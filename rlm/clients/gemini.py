@@ -49,7 +49,12 @@ class GeminiClient(BaseLM):
         self.last_prompt_tokens = 0
         self.last_completion_tokens = 0
 
-    def completion(self, prompt: str | list[dict[str, Any]], model: str | None = None) -> str:
+    def completion(
+        self,
+        prompt: str | list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
         contents, system_instruction = self._prepare_contents(prompt)
 
         model = model or self.model_name
@@ -70,7 +75,10 @@ class GeminiClient(BaseLM):
         return response.text
 
     async def acompletion(
-        self, prompt: str | list[dict[str, Any]], model: str | None = None
+        self,
+        prompt: str | list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> str:
         contents, system_instruction = self._prepare_contents(prompt)
 

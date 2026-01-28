@@ -8,6 +8,7 @@ import asyncio
 import time
 from socketserver import StreamRequestHandler, ThreadingTCPServer
 from threading import Thread
+from typing import Any
 
 from rlm.clients.base_lm import BaseLM
 from rlm.core.comms_utils import LMRequest, LMResponse, socket_recv, socket_send
@@ -48,7 +49,7 @@ class LMRequestHandler(StreamRequestHandler):
         client = handler.get_client(request.model, request.depth)
 
         start_time = time.perf_counter()
-        content = client.completion(request.prompt)
+        content = client.completion(request.prompt, tools=request.tools)
         end_time = time.perf_counter()
 
         model_usage = client.get_last_usage()
@@ -181,9 +182,14 @@ class LMHandler:
             self._server = None
             self._thread = None
 
-    def completion(self, prompt: str, model: str | None = None) -> str:
+    def completion(
+        self,
+        prompt: str | list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
         """Direct completion call (for main process use)."""
-        return self.get_client(model).completion(prompt)
+        return self.get_client(model).completion(prompt, tools=tools)
 
     def __enter__(self):
         self.start()

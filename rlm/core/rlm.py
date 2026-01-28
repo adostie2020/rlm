@@ -52,6 +52,7 @@ class RLM:
         logger: RLMLogger | None = None,
         verbose: bool = False,
         persistent: bool = False,
+        tools: list[dict[str, Any]] | None = None,
     ):
         """
         Args:
@@ -68,6 +69,7 @@ class RLM:
             logger: The logger to use for the RLM.
             verbose: Whether to print verbose output in rich to console.
             persistent: If True, reuse the environment across completion() calls for multi-turn conversations.
+            tools: Optional list of tools (function definitions) to pass to the language model for function calling.
         """
         # Store config for spawning per-completion
         self.backend = backend
@@ -97,6 +99,9 @@ class RLM:
         # Persistence support
         self.persistent = persistent
         self._persistent_env: SupportsPersistence | None = None
+
+        # Tools support
+        self.tools = tools
 
         # Validate persistence support at initialization
         if self.persistent:
@@ -190,7 +195,10 @@ class RLM:
         return message_history
 
     def completion(
-        self, prompt: str | dict[str, Any], root_prompt: str | None = None
+        self,
+        prompt: str | dict[str, Any],
+        root_prompt: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> RLMChatCompletion:
         """
         Recursive Language Model completion call. This is the main entry point for querying an RLM, and
@@ -210,6 +218,9 @@ class RLM:
         # If we're at max depth, the RLM is an LM, so we fallback to the regular LM.
         if self.depth >= self.max_depth:
             return self._fallback_answer(prompt)
+
+        # Use tools from method parameter if provided, otherwise use instance tools
+        tools_to_use = tools if tools is not None else self.tools
 
         with self._spawn_completion_context(prompt) as (lm_handler, environment):
             message_history = self._setup_prompt(prompt)
@@ -234,6 +245,7 @@ class RLM:
                     prompt=current_prompt,
                     lm_handler=lm_handler,
                     environment=environment,
+                    tools=tools_to_use,
                 )
 
                 # Check if RLM is done and has a final answer.
@@ -275,7 +287,7 @@ class RLM:
 
             # Default behavior: we run out of iterations, provide one final answer
             time_end = time.perf_counter()
-            final_answer = self._default_answer(message_history, lm_handler)
+            final_answer = self._default_answer(message_history, lm_handler, tools=tools_to_use)
             usage = lm_handler.get_usage_summary()
             self.verbose.print_final_answer(final_answer)
             self.verbose.print_summary(self.max_iterations, time_end - time_start, usage.to_dict())
@@ -299,13 +311,14 @@ class RLM:
         prompt: str | dict[str, Any],
         lm_handler: LMHandler,
         environment: BaseEnv,
+        tools: list[dict[str, Any]] | None = None,
     ) -> RLMIteration:
         """
         Perform a single iteration of the RLM, including prompting the model
         and code execution + tool execution.
         """
         iter_start = time.perf_counter()
-        response = lm_handler.completion(prompt)
+        response = lm_handler.completion(prompt, tools=tools)
         code_block_strs = find_code_blocks(response)
         code_blocks = []
 
@@ -321,7 +334,12 @@ class RLM:
             iteration_time=iteration_time,
         )
 
-    def _default_answer(self, message_history: list[dict[str, Any]], lm_handler: LMHandler) -> str:
+    def _default_answer(
+        self,
+        message_history: list[dict[str, Any]],
+        lm_handler: LMHandler,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
         """
         Default behavior if the RLM runs out of iterations and does not find a final answer.
         It will take the message history, and try to generate a final answer from it.
@@ -332,7 +350,7 @@ class RLM:
                 "content": "Please provide a final answer to the user's question based on the information provided.",
             }
         ]
-        response = lm_handler.completion(current_prompt)
+        response = lm_handler.completion(current_prompt, tools=tools)
 
         if self.logger:
             self.logger.log(

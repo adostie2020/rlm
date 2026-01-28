@@ -1,3 +1,4 @@
+import json
 import os
 from collections import defaultdict
 from typing import Any
@@ -50,30 +51,11 @@ class OpenAIClient(BaseLM):
         self.model_output_tokens: dict[str, int] = defaultdict(int)
         self.model_total_tokens: dict[str, int] = defaultdict(int)
 
-    def completion(self, prompt: str | list[dict[str, Any]], model: str | None = None) -> str:
-        if isinstance(prompt, str):
-            messages = [{"role": "user", "content": prompt}]
-        elif isinstance(prompt, list) and all(isinstance(item, dict) for item in prompt):
-            messages = prompt
-        else:
-            raise ValueError(f"Invalid prompt type: {type(prompt)}")
-
-        model = model or self.model_name
-        if not model:
-            raise ValueError("Model name is required for OpenAI client.")
-
-        extra_body = {}
-        if self.client.base_url == DEFAULT_PRIME_INTELLECT_BASE_URL:
-            extra_body["usage"] = {"include": True}
-
-        response = self.client.chat.completions.create(
-            model=model, messages=messages, extra_body=extra_body
-        )
-        self._track_cost(response, model)
-        return response.choices[0].message.content
-
-    async def acompletion(
-        self, prompt: str | list[dict[str, Any]], model: str | None = None
+    def completion(
+        self,
+        prompt: str | list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> str:
         if isinstance(prompt, str):
             messages = [{"role": "user", "content": prompt}]
@@ -90,11 +72,82 @@ class OpenAIClient(BaseLM):
         if self.client.base_url == DEFAULT_PRIME_INTELLECT_BASE_URL:
             extra_body["usage"] = {"include": True}
 
-        response = await self.async_client.chat.completions.create(
-            model=model, messages=messages, extra_body=extra_body
-        )
+        kwargs = {"model": model, "messages": messages, "extra_body": extra_body}
+        if tools is not None:
+            kwargs["tools"] = tools
+
+        response = self.client.chat.completions.create(**kwargs)
         self._track_cost(response, model)
-        return response.choices[0].message.content
+        
+        message = response.choices[0].message
+        content = message.content
+
+        if content is None and message.tool_calls:
+            code_lines = []
+            for tool_call in message.tool_calls:
+                func_name = tool_call.function.name
+                try:
+                    args = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                
+                # Construct python call
+                args_str = ", ".join(f"{k}={repr(v)}" for k, v in args.items())
+                code_lines.append(f"print({func_name}({args_str}))")
+            
+            # Wrap in REPL block
+            return "```repl\n" + "\n".join(code_lines) + "\n```"
+
+        return content or ""
+
+    async def acompletion(
+        self,
+        prompt: str | list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list) and all(isinstance(item, dict) for item in prompt):
+            messages = prompt
+        else:
+            raise ValueError(f"Invalid prompt type: {type(prompt)}")
+
+        model = model or self.model_name
+        if not model:
+            raise ValueError("Model name is required for OpenAI client.")
+
+        extra_body = {}
+        if self.client.base_url == DEFAULT_PRIME_INTELLECT_BASE_URL:
+            extra_body["usage"] = {"include": True}
+
+        kwargs = {"model": model, "messages": messages, "extra_body": extra_body}
+        if tools is not None:
+            kwargs["tools"] = tools
+
+        response = await self.async_client.chat.completions.create(**kwargs)
+        self._track_cost(response, model)
+        
+        message = response.choices[0].message
+        content = message.content
+
+        if content is None and message.tool_calls:
+            code_lines = []
+            for tool_call in message.tool_calls:
+                func_name = tool_call.function.name
+                try:
+                    args = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                
+                # Construct python call
+                args_str = ", ".join(f"{k}={repr(v)}" for k, v in args.items())
+                code_lines.append(f"print({func_name}({args_str}))")
+            
+            # Wrap in REPL block
+            return "```repl\n" + "\n".join(code_lines) + "\n```"
+
+        return content or ""
 
     def _track_cost(self, response: openai.ChatCompletion, model: str):
         self.model_call_counts[model] += 1

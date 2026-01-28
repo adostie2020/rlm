@@ -29,6 +29,7 @@ class LMRequest:
     prompts: list[str | dict[str, Any]] | None = None
     model: str | None = None
     depth: int = 0
+    tools: list[dict[str, Any]] | None = None
 
     @property
     def is_batched(self) -> bool:
@@ -45,6 +46,8 @@ class LMRequest:
         if self.model is not None:
             d["model"] = self.model
         d["depth"] = self.depth
+        if self.tools is not None:
+            d["tools"] = self.tools
         return d
 
     @classmethod
@@ -55,6 +58,7 @@ class LMRequest:
             prompts=data.get("prompts"),
             model=data.get("model"),
             depth=data.get("depth", -1),  # TODO: Default should throw an error
+            tools=data.get("tools"),
         )
 
 
@@ -202,7 +206,11 @@ def socket_request(address: tuple[str, int], data: dict, timeout: int = 300) -> 
 
 
 def send_lm_request(
-    address: tuple[str, int], request: LMRequest, timeout: int = 300, depth: int | None = None
+    address: tuple[str, int],
+    request: LMRequest,
+    timeout: int = 300,
+    depth: int | None = None,
+    tools: list[dict[str, Any]] | None = None,
 ) -> LMResponse:
     """Send an LM request and return typed response.
 
@@ -211,6 +219,7 @@ def send_lm_request(
         request: LMRequest to send.
         timeout: Socket timeout in seconds.
         depth: Optional depth to override request depth.
+        tools: Optional tools to override request tools.
 
     Returns:
         LMResponse with content or error.
@@ -218,6 +227,8 @@ def send_lm_request(
     try:
         if depth is not None:
             request.depth = depth
+        if tools is not None:
+            request.tools = tools
         response_data = socket_request(address, request.to_dict(), timeout)
         return LMResponse.from_dict(response_data)
     except Exception as e:
@@ -230,6 +241,7 @@ def send_lm_request_batched(
     model: str | None = None,
     timeout: int = 300,
     depth: int = 0,
+    tools: list[dict[str, Any]] | None = None,
 ) -> list[LMResponse]:
     """Send a batched LM request and return a list of typed responses.
 
@@ -239,12 +251,13 @@ def send_lm_request_batched(
         model: Optional model name to use.
         timeout: Socket timeout in seconds.
         depth: Depth for routing (default 0).
+        tools: Optional tools to pass to the language model.
 
     Returns:
         List of LMResponse objects, one per prompt, in the same order.
     """
     try:
-        request = LMRequest(prompts=prompts, model=model, depth=depth)
+        request = LMRequest(prompts=prompts, model=model, depth=depth, tools=tools)
         response_data = socket_request(address, request.to_dict(), timeout)
         response = LMResponse.from_dict(response_data)
 

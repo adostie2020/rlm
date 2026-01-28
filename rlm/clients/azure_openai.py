@@ -69,27 +69,11 @@ class AzureOpenAIClient(BaseLM):
         self.model_output_tokens: dict[str, int] = defaultdict(int)
         self.model_total_tokens: dict[str, int] = defaultdict(int)
 
-    def completion(self, prompt: str | list[dict[str, Any]], model: str | None = None) -> str:
-        if isinstance(prompt, str):
-            messages = [{"role": "user", "content": prompt}]
-        elif isinstance(prompt, list) and all(isinstance(item, dict) for item in prompt):
-            messages = prompt
-        else:
-            raise ValueError(f"Invalid prompt type: {type(prompt)}")
-
-        model = model or self.model_name
-        if not model:
-            raise ValueError("Model name is required for Azure OpenAI client.")
-
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-        )
-        self._track_cost(response, model)
-        return response.choices[0].message.content
-
-    async def acompletion(
-        self, prompt: str | list[dict[str, Any]], model: str | None = None
+    def completion(
+        self,
+        prompt: str | list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> str:
         if isinstance(prompt, str):
             messages = [{"role": "user", "content": prompt}]
@@ -102,10 +86,36 @@ class AzureOpenAIClient(BaseLM):
         if not model:
             raise ValueError("Model name is required for Azure OpenAI client.")
 
-        response = await self.async_client.chat.completions.create(
-            model=model,
-            messages=messages,
-        )
+        kwargs = {"model": model, "messages": messages}
+        if tools is not None:
+            kwargs["tools"] = tools
+
+        response = self.client.chat.completions.create(**kwargs)
+        self._track_cost(response, model)
+        return response.choices[0].message.content
+
+    async def acompletion(
+        self,
+        prompt: str | list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list) and all(isinstance(item, dict) for item in prompt):
+            messages = prompt
+        else:
+            raise ValueError(f"Invalid prompt type: {type(prompt)}")
+
+        model = model or self.model_name
+        if not model:
+            raise ValueError("Model name is required for Azure OpenAI client.")
+
+        kwargs = {"model": model, "messages": messages}
+        if tools is not None:
+            kwargs["tools"] = tools
+
+        response = await self.async_client.chat.completions.create(**kwargs)
         self._track_cost(response, model)
         return response.choices[0].message.content
 

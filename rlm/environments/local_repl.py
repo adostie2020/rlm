@@ -81,6 +81,7 @@ _SAFE_BUILTINS = {
     "staticmethod": staticmethod,
     "classmethod": classmethod,
     "__import__": __import__,
+    "__build_class__": __build_class__,
     "open": open,
     # Exceptions
     "Exception": Exception,
@@ -145,7 +146,9 @@ class LocalREPL(NonIsolatedEnv):
 
         # Run setup code if provided
         if setup_code:
-            self.execute_code(setup_code)
+            result = self.execute_code(setup_code)
+            if result.stderr:
+                print(f"Setup code execution failed:\n{result.stderr}")
 
     def setup(self):
         """Setup the environment."""

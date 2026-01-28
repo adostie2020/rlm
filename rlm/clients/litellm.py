@@ -31,30 +31,11 @@ class LiteLLMClient(BaseLM):
         self.model_output_tokens: dict[str, int] = defaultdict(int)
         self.model_total_tokens: dict[str, int] = defaultdict(int)
 
-    def completion(self, prompt: str | list[dict[str, Any]], model: str | None = None) -> str:
-        if isinstance(prompt, str):
-            messages = [{"role": "user", "content": prompt}]
-        elif isinstance(prompt, list) and all(isinstance(item, dict) for item in prompt):
-            messages = prompt
-        else:
-            raise ValueError(f"Invalid prompt type: {type(prompt)}")
-
-        model = model or self.model_name
-        if not model:
-            raise ValueError("Model name is required for LiteLLM client.")
-
-        kwargs = {"model": model, "messages": messages}
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
-
-        response = litellm.completion(**kwargs)
-        self._track_cost(response, model)
-        return response.choices[0].message.content
-
-    async def acompletion(
-        self, prompt: str | list[dict[str, Any]], model: str | None = None
+    def completion(
+        self,
+        prompt: str | list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> str:
         if isinstance(prompt, str):
             messages = [{"role": "user", "content": prompt}]
@@ -72,6 +53,37 @@ class LiteLLMClient(BaseLM):
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
+        if tools is not None:
+            kwargs["tools"] = tools
+
+        response = litellm.completion(**kwargs)
+        self._track_cost(response, model)
+        return response.choices[0].message.content
+
+    async def acompletion(
+        self,
+        prompt: str | list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        elif isinstance(prompt, list) and all(isinstance(item, dict) for item in prompt):
+            messages = prompt
+        else:
+            raise ValueError(f"Invalid prompt type: {type(prompt)}")
+
+        model = model or self.model_name
+        if not model:
+            raise ValueError("Model name is required for LiteLLM client.")
+
+        kwargs = {"model": model, "messages": messages}
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if tools is not None:
+            kwargs["tools"] = tools
 
         response = await litellm.acompletion(**kwargs)
         self._track_cost(response, model)
