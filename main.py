@@ -75,12 +75,37 @@ class GenerateRequest(BaseModel):
     prompt: str
     context: Optional[str] = None
 
+class GeneralCompletionRequest(BaseModel):
+    root_prompt: str
+    prompt: str
+
 class GenerateResponse(BaseModel):
     result: str
 
 @app.get("/")
 def read_root():
     return {"status": "ok", "service": "RLM API"}
+
+@app.post("/general_completion", response_model=GenerateResponse)
+async def general_completion(request: GeneralCompletionRequest):
+    if not rlm:
+        raise HTTPException(status_code=500, detail="RLM backend not initialized")
+    
+    try:
+        # Call completion without tools and without extra context logic
+        result = rlm.completion(request.prompt, request.root_prompt, tools=[])
+        
+        response_text = ""
+        if isinstance(result, RLMChatCompletion):
+            response_text = result.response
+        elif isinstance(result, str):
+            response_text = result
+        else:
+            response_text = str(result)
+            
+        return GenerateResponse(result=response_text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate", response_model=GenerateResponse)
 async def generate(request: GenerateRequest):
