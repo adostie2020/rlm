@@ -14,11 +14,9 @@ JIRA_TOOLS = [
                     "jql": {
                         "type": "string",
                         "description": "The JQL query string (e.g., 'project = PROJ AND status = Open')."
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return (default 50).",
-                        "default": 50
+                    }, 
+                    "fields": {"type":"string",
+                        "description": "A list of fields to include in the response"
                     }
                 },
                 "required": ["jql"]

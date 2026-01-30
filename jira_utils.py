@@ -47,6 +47,7 @@ class JiraFields(BaseModel):
     # on unexpected structures
     issuelinks: list[Any] | None = None
     comment: dict[str, Any] | None = None
+    duedate: str | None = None
 
 class JiraIssue(BaseModel):
     id: str
@@ -84,15 +85,16 @@ def _get_jira_session():
 
 # --- Tool Functions ---
 
-def jira_search_issues(jql: str, max_results: int = 50) -> list[JiraIssue] | list[JiraError]:
+def jira_search_issues(jql: str, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"
+) -> list[JiraIssue] | list[JiraError]:
     """Search for Jira issues using JQL and return validated Pydantic models."""
     try:
         session, base_url = _get_jira_session()
         url = f"{base_url}/rest/api/3/search/jql"
         params = {
             "jql": jql,
-            "maxResults": max_results,
-            "fields": "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project"
+            "maxResults": 50,
+            "fields": fields
         }
         
         response = session.get(url, params=params)
@@ -182,3 +184,11 @@ def jira_get_recent_projects() -> list[JiraProject] | list[JiraError]:
         
     except Exception as e:
         return [JiraError(error=str(e))]
+
+def jira_get_recent_user_activity(days: int = 14, max_results: int = 20) -> list[JiraIssue] | list[JiraError]:
+    """
+    Get issues updated in the last `days` where the user is assignee, reporter, or watcher.
+    """
+    jql = f"updated >= -{days}d AND (assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) ORDER BY updated DESC"
+    return jira_search_issues(jql)
+

@@ -5,6 +5,12 @@ from typing import Any
 
 import openai
 from dotenv import load_dotenv
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential,
+    retry_if_not_exception_type,
+)
 
 from rlm.clients.base_lm import BaseLM
 from rlm.core.types import ModelUsageSummary, UsageSummary
@@ -51,6 +57,34 @@ class OpenAIClient(BaseLM):
         self.model_output_tokens: dict[str, int] = defaultdict(int)
         self.model_total_tokens: dict[str, int] = defaultdict(int)
 
+    @retry(
+        wait=wait_random_exponential(min=1, max=60),
+        stop=stop_after_attempt(6),
+        retry=retry_if_not_exception_type(
+            (
+                openai.BadRequestError,
+                openai.AuthenticationError,
+                openai.NotFoundError,
+            )
+        ),
+    )
+    def _create_completion(self, **kwargs):
+        return self.client.chat.completions.create(**kwargs)
+
+    @retry(
+        wait=wait_random_exponential(min=1, max=60),
+        stop=stop_after_attempt(6),
+        retry=retry_if_not_exception_type(
+            (
+                openai.BadRequestError,
+                openai.AuthenticationError,
+                openai.NotFoundError,
+            )
+        ),
+    )
+    async def _create_acompletion(self, **kwargs):
+        return await self.async_client.chat.completions.create(**kwargs)
+
     def completion(
         self,
         prompt: str | list[dict[str, Any]],
@@ -76,7 +110,26 @@ class OpenAIClient(BaseLM):
         if tools is not None:
             kwargs["tools"] = tools
 
-        response = self.client.chat.completions.create(**kwargs)
+        # Merge kwargs from __init__
+        kwargs.update(self.kwargs)
+
+        # Handle max_tokens vs max_completion_tokens
+        if model and (model.startswith("o1") or model.startswith("o3")):
+            # Rename max_tokens to max_completion_tokens if present
+            if "max_tokens" in kwargs:
+                if "max_completion_tokens" not in kwargs:
+                    kwargs["max_completion_tokens"] = kwargs["max_tokens"]
+                del kwargs["max_tokens"]
+            
+            # Set default if still missing
+            if "max_completion_tokens" not in kwargs:
+                kwargs["max_completion_tokens"] = 8192
+        else:
+            # Default for standard models
+            if "max_tokens" not in kwargs and "max_completion_tokens" not in kwargs:
+                kwargs["max_completion_tokens"] = 8192
+
+        response = self._create_completion(**kwargs)
         self._track_cost(response, model)
         
         message = response.choices[0].message
@@ -125,7 +178,26 @@ class OpenAIClient(BaseLM):
         if tools is not None:
             kwargs["tools"] = tools
 
-        response = await self.async_client.chat.completions.create(**kwargs)
+        # Merge kwargs from __init__
+        kwargs.update(self.kwargs)
+
+        # Handle max_tokens vs max_completion_tokens
+        if model and (model.startswith("o1") or model.startswith("o3")):
+            # Rename max_tokens to max_completion_tokens if present
+            if "max_tokens" in kwargs:
+                if "max_completion_tokens" not in kwargs:
+                    kwargs["max_completion_tokens"] = kwargs["max_tokens"]
+                del kwargs["max_completion_tokens"]
+            
+            # Set default if still missing
+            if "max_completion_tokens" not in kwargs:
+                kwargs["max_completion_tokens"] = 8192
+        else:
+            # Default for standard models
+            if "max_tokens" not in kwargs and "max_completion_tokens" not in kwargs:
+                kwargs["max_completion_tokens"] = 8192
+
+        response = await self._create_acompletion(**kwargs)
         self._track_cost(response, model)
         
         message = response.choices[0].message
