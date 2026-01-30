@@ -60,7 +60,7 @@ try:
             "model_name": MODEL_NAME,
             "api_key": API_KEY,
         },
-        environment="local",
+        environment="modal",
         environment_kwargs={
             "setup_code": jira_setup_code
         },
