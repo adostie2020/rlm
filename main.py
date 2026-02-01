@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from rlm import RLM
 from rlm.core.types import RLMChatCompletion
 from rlm.logger import RLMLogger
-from rag_processing import translate_query
 from jira_utils import _get_jira_session
 
 # Import tools
@@ -190,3 +189,6 @@ def jira_list_projects():
         return GenerateResponse(result=response_text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
