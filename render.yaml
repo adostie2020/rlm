@@ -1,0 +1,22 @@
+services:
+  # --------------------------------------------------------------------------------
+  # RLM Backend (FastAPI)
+  # --------------------------------------------------------------------------------
+  - type: web
+    name: rlm-api
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install uv && uv sync --frozen
+    startCommand: uv run uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: RLM_BACKEND
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false  # Prompt user for value
+      - key: MODAL_TOKEN_ID
+        sync: false
+      - key: MODAL_TOKEN_SECRET
+        sync: false

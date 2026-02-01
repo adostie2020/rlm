@@ -14,6 +14,8 @@ PIP_PACKAGES = [
     "numpy>=1.26.0",
     "pandas>=2.1.0",
     "scipy>=1.11.0",
+    "scikit-learn>=1.3.0",
+    "matplotlib>=3.8.0",
     # Math & symbolic computation
     "sympy>=1.12",
     # HTTP & APIs
