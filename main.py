@@ -2,13 +2,14 @@ import os
 from typing import Optional
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from rlm import RLM
 from rlm.core.types import RLMChatCompletion
 from rlm.logger import RLMLogger
 from rag_processing import translate_query
+from jira_utils import _get_jira_session
 
 # Import tools
 try:
@@ -40,44 +41,46 @@ logger = RLMLogger(log_dir="./logs")
 
 # Configuration
 BACKEND = os.getenv("RLM_BACKEND", "openai")
-MODEL_NAME = os.getenv("RLM_MODEL_NAME", "gpt-4o")
 API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not API_KEY and BACKEND == "openai":
     print("Warning: OPENAI_API_KEY not found in environment.")
 
-# Load Jira setup code
-jira_setup_code = ""
+# Load Jira setup code base
+jira_setup_base = ""
 if os.path.exists("jira_utils.py"):
     with open("jira_utils.py") as f:
-        jira_setup_code = f.read()
-
-rlm = None
-try:
-    rlm = RLM(
-        backend=BACKEND,
-        backend_kwargs={
-            "model_name": MODEL_NAME,
-            "api_key": API_KEY,
-        },
-        environment="modal",
-        environment_kwargs={
-            "setup_code": jira_setup_code
-        },
-        max_depth=1,
-        logger=logger,
-        verbose=True,
-    )
-except Exception as e:
-    print(f"Failed to initialize RLM: {e}")
+        jira_setup_base = f.read()
+def rlm_init(model_name):
+    rlm = None
+    try:
+        rlm = RLM(
+            backend=BACKEND,
+            backend_kwargs={
+                "model_name": model_name,
+                "api_key": API_KEY,
+            },
+            environment="modal",
+            environment_kwargs={
+                "setup_code": jira_setup_base # Default setup
+            },
+            max_depth=1,
+            logger=logger,
+            verbose=True,
+        )
+    except Exception as e:
+        print(f"Failed to initialize RLM: {e}")
+    return rlm
 
 class GenerateRequest(BaseModel):
     prompt: str
     context: Optional[str] = None
+    model: str
 
 class GeneralCompletionRequest(BaseModel):
     root_prompt: str
     prompt: str
+    model: str
 
 class GenerateResponse(BaseModel):
     result: str
@@ -88,6 +91,7 @@ def read_root():
 
 @app.post("/general_completion", response_model=GenerateResponse)
 async def general_completion(request: GeneralCompletionRequest):
+    rlm = rlm_init(request.model)
     if not rlm:
         raise HTTPException(status_code=500, detail="RLM backend not initialized")
     
@@ -108,23 +112,72 @@ async def general_completion(request: GeneralCompletionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate", response_model=GenerateResponse)
-async def generate(request: GenerateRequest):
+async def generate(request: Request, body: GenerateRequest):
+    rlm = rlm_init(body.model)
+
     if not rlm:
         raise HTTPException(status_code=500, detail="RLM backend not initialized")
     
     try:
-        # Fetch Jira context
-        jira_context = get_jira_context()
+        # Extract Jira credentials from headers
+        jira_token = request.headers.get("X-Jira-Token")
+        jira_cloud_id = request.headers.get("X-Jira-Resource-Id")
         
-        # Construct full prompt
-        context_str = request.context if request.context is not None else ""
-        full_prompt = context_str + f"\n\n{jira_context}"
-        root_prompt = translate_query(request.prompt)
-        if root_prompt is None:
-            root_prompt = request.prompt
+        jira_base_url = None
+        if jira_cloud_id:
+            jira_base_url = f"https://api.atlassian.com/ex/jira/{jira_cloud_id}"
 
-        # Pass JIRA_TOOLS to completion
-        result = rlm.completion(full_prompt, root_prompt, tools=JIRA_TOOLS)
+        # Fetch Jira context
+        jira_context = ""
+        if jira_base_url and jira_token:
+            jira_context = get_jira_context(jira_base_url, jira_token)
+        else:
+            jira_context = "Jira credentials not provided in headers (X-Jira-Token, X-Jira-Resource-Id)."
+        
+        # Construct dynamic setup code with wrappers
+        # We wrap the functions to inject the token/url so the LLM doesn't need to know them
+        if jira_base_url and jira_token:
+            wrappers = f"""
+# --- Jira Wrapper Functions Injected by Main ---
+_raw_jira_search_issues = jira_search_issues
+def jira_search_issues(jql, fields="summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"):
+    return _raw_jira_search_issues(jql, "{jira_base_url}", "{jira_token}", fields)
+
+_raw_jira_get_issue = jira_get_issue
+def jira_get_issue(issue_key):
+    return _raw_jira_get_issue(issue_key, "{jira_base_url}", "{jira_token}")
+
+_raw_jira_get_issue_comments = jira_get_issue_comments
+def jira_get_issue_comments(issue_key):
+    return _raw_jira_get_issue_comments(issue_key, "{jira_base_url}", "{jira_token}")
+
+_raw_jira_get_project = jira_get_project
+def jira_get_project(project_key):
+    return _raw_jira_get_project(project_key, "{jira_base_url}", "{jira_token}")
+
+_raw_jira_list_projects = jira_list_projects
+def jira_list_projects():
+    return _raw_jira_list_projects("{jira_base_url}", "{jira_token}")
+"""
+            dynamic_setup_code = jira_setup_base + wrappers
+        else:
+            dynamic_setup_code = jira_setup_base
+
+        # Construct full prompt
+        context_str = body.context if body.context is not None else ""
+        full_prompt = context_str + f"\n\n{jira_context}"
+        root_prompt = translate_query(body.prompt)
+        if root_prompt is None:
+            root_prompt = body.prompt
+
+        # Pass JIRA_TOOLS and dynamic setup code to completion
+        # Use environment_overrides to pass the request-specific setup code
+        result = rlm.completion(
+            full_prompt, 
+            root_prompt, 
+            tools=JIRA_TOOLS,
+            environment_overrides={"setup_code": dynamic_setup_code}
+        )
         
         response_text = ""
         if isinstance(result, RLMChatCompletion):
@@ -137,10 +190,3 @@ async def generate(request: GenerateRequest):
         return GenerateResponse(result=response_text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-def start():
-    """Launched with `poetry run start` at root level"""
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
-if __name__ == "__main__":
-    start()

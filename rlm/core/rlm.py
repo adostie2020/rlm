@@ -1,6 +1,6 @@
 import time
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Callable
 
 from rlm.clients import BaseLM, get_client
 from rlm.core.lm_handler import LMHandler
@@ -128,7 +128,7 @@ class RLM:
             self.verbose.print_metadata(metadata)
 
     @contextmanager
-    def _spawn_completion_context(self, prompt: str | dict[str, Any]):
+    def _spawn_completion_context(self, prompt: str | dict[str, Any], environment_overrides: dict[str, Any] | None = None, backend_kwargs_overrides: dict[str, Any] | None = None):
         """
         Spawn an LM handler and environment for a single completion call.
 
@@ -136,7 +136,11 @@ class RLM:
         When persistent=False (default), creates fresh environment each call.
         """
         # Create client and wrap in handler
-        client: BaseLM = get_client(self.backend, self.backend_kwargs)
+        current_backend_kwargs = self.backend_kwargs.copy() if self.backend_kwargs else {}
+        if backend_kwargs_overrides:
+            current_backend_kwargs.update(backend_kwargs_overrides)
+            
+        client: BaseLM = get_client(self.backend, current_backend_kwargs)
 
         # Create other_backend_client if provided (for depth=1 routing)
         other_backend_client: BaseLM | None = None
@@ -167,6 +171,11 @@ class RLM:
             environment.add_context(prompt)
         else:
             env_kwargs = self.environment_kwargs.copy()
+            
+            # Apply overrides if provided
+            if environment_overrides:
+                env_kwargs.update(environment_overrides)
+            
             env_kwargs["lm_handler_address"] = (lm_handler.host, lm_handler.port)
             env_kwargs["context_payload"] = prompt
             env_kwargs["depth"] = self.depth + 1  # Environment depth is RLM depth + 1
@@ -199,6 +208,9 @@ class RLM:
         prompt: str | dict[str, Any],
         root_prompt: str | None = None,
         tools: list[dict[str, Any]] | None = None,
+        environment_overrides: dict[str, Any] | None = None,
+        backend_kwargs_overrides: dict[str, Any] | None = None,
+        iteration_callback: Callable[[RLMIteration], None] | None = None,
     ) -> RLMChatCompletion:
         """
         Recursive Language Model completion call. This is the main entry point for querying an RLM, and
@@ -210,6 +222,10 @@ class RLM:
             prompt: A single string or dictionary of messages to pass as context to the model.
             root_prompt: We allow the RLM's root LM to see a (small) prompt that the user specifies. A common example of this
             is if the user is asking the RLM to answer a question, we can pass the question as the root prompt.
+            tools: Optional list of tools (function definitions) to pass to the language model for function calling.
+            environment_overrides: Optional dictionary of kwargs to override the default environment configuration for this call.
+            backend_kwargs_overrides: Optional dictionary of kwargs to override the default backend configuration for this call.
+            iteration_callback: Optional callback function that receives each RLMIteration object as it is generated.
         Returns:
             A final answer as a string.
         """
@@ -222,7 +238,7 @@ class RLM:
         # Use tools from method parameter if provided, otherwise use instance tools
         tools_to_use = tools if tools is not None else self.tools
 
-        with self._spawn_completion_context(prompt) as (lm_handler, environment):
+        with self._spawn_completion_context(prompt, environment_overrides, backend_kwargs_overrides) as (lm_handler, environment):
             message_history = self._setup_prompt(prompt)
 
             for i in range(self.max_iterations):
@@ -256,6 +272,9 @@ class RLM:
                 if self.logger:
                     self.logger.log(iteration)
 
+                if iteration_callback:
+                    iteration_callback(iteration)
+
                 # Verbose output for this iteration
                 self.verbose.print_iteration(iteration, i + 1)
 
@@ -287,7 +306,9 @@ class RLM:
 
             # Default behavior: we run out of iterations, provide one final answer
             time_end = time.perf_counter()
-            final_answer = self._default_answer(message_history, lm_handler, tools=tools_to_use)
+            final_answer = self._default_answer(
+                message_history, lm_handler, tools=tools_to_use, iteration_callback=iteration_callback
+            )
             usage = lm_handler.get_usage_summary()
             self.verbose.print_final_answer(final_answer)
             self.verbose.print_summary(self.max_iterations, time_end - time_start, usage.to_dict())
@@ -339,6 +360,7 @@ class RLM:
         message_history: list[dict[str, Any]],
         lm_handler: LMHandler,
         tools: list[dict[str, Any]] | None = None,
+        iteration_callback: Callable[[RLMIteration], None] | None = None,
     ) -> str:
         """
         Default behavior if the RLM runs out of iterations and does not find a final answer.
@@ -352,15 +374,18 @@ class RLM:
         ]
         response = lm_handler.completion(current_prompt, tools=tools)
 
+        iteration = RLMIteration(
+            prompt=current_prompt,
+            response=response,
+            final_answer=response,
+            code_blocks=[],
+        )
+
         if self.logger:
-            self.logger.log(
-                RLMIteration(
-                    prompt=current_prompt,
-                    response=response,
-                    final_answer=response,
-                    code_blocks=[],
-                )
-            )
+            self.logger.log(iteration)
+
+        if iteration_callback:
+            iteration_callback(iteration)
 
         return response
 

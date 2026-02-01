@@ -8,7 +8,7 @@ class MockLM(BaseLM):
     def __init__(self):
         super().__init__(model_name="mock-model")
 
-    def completion(self, prompt):
+    def completion(self, prompt, tools=None):
         return f"Mock response to: {prompt[:50]}"
 
     async def acompletion(self, prompt):

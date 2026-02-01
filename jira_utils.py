@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field
 
 # Environment variables expected:
 # JIRA_BASE_URL
-# JIRA_EMAIL
 # JIRA_API_TOKEN
 
 # --- Pydantic Models ---
@@ -67,29 +66,25 @@ class JiraError(BaseModel):
 
 # --- Helper ---
 
-def _get_jira_session():
-    base_url = os.environ.get("JIRA_BASE_URL")
-    email = os.environ.get("JIRA_EMAIL")
-    token = os.environ.get("JIRA_API_TOKEN")
-
-    if not all([base_url, email, token]):
-        raise ValueError("Missing Jira credentials. Please set JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN in the environment.")
+def _get_jira_session(base_url: str, token: str):
+    if not all([base_url, token]):
+        raise ValueError("Missing Jira credentials. Please provide base_url and token.")
     
     session = requests.Session()
-    session.auth = (email, token)
     session.headers.update({
         "Accept": "application/json",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-Jira-Token": token
     })
     return session, base_url.rstrip("/")
 
 # --- Tool Functions ---
 
-def jira_search_issues(jql: str, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"
+def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"
 ) -> list[JiraIssue] | list[JiraError]:
     """Search for Jira issues using JQL and return validated Pydantic models."""
     try:
-        session, base_url = _get_jira_session()
+        session, base_url = _get_jira_session(jira_base_url, jira_token)
         url = f"{base_url}/rest/api/3/search/jql"
         params = {
             "jql": jql,
@@ -108,10 +103,10 @@ def jira_search_issues(jql: str, fields: str = "summary,status,assignee,priority
     except Exception as e:
         return [JiraError(error=str(e))]
 
-def jira_get_issue(issue_key: str) -> JiraIssue | JiraError:
+def jira_get_issue(issue_key: str, jira_base_url: str, jira_token: str) -> JiraIssue | JiraError:
     """Get details of a specific Jira issue as a Pydantic model."""
     try:
-        session, base_url = _get_jira_session()
+        session, base_url = _get_jira_session(jira_base_url, jira_token)
         url = f"{base_url}/rest/api/3/issue/{issue_key}"
         
         response = session.get(url)
@@ -123,10 +118,10 @@ def jira_get_issue(issue_key: str) -> JiraIssue | JiraError:
     except Exception as e:
         return JiraError(error=str(e))
 
-def jira_get_issue_comments(issue_key: str) -> list[JiraComment] | JiraError:
+def jira_get_issue_comments(issue_key: str, jira_base_url: str, jira_token: str) -> list[JiraComment] | JiraError:
     """Get all comments for a specific Jira issue as a list of Pydantic models."""
     try:
-        session, base_url = _get_jira_session()
+        session, base_url = _get_jira_session(jira_base_url, jira_token)
         url = f"{base_url}/rest/api/3/issue/{issue_key}/comment"
         
         response = session.get(url)
@@ -139,10 +134,10 @@ def jira_get_issue_comments(issue_key: str) -> list[JiraComment] | JiraError:
     except Exception as e:
         return JiraError(error=str(e))
 
-def jira_get_project(project_key: str) -> JiraProject | JiraError:
+def jira_get_project(project_key: str, jira_base_url: str, jira_token: str) -> JiraProject | JiraError:
     """Get details of a specific Jira project as a Pydantic model."""
     try:
-        session, base_url = _get_jira_session()
+        session, base_url = _get_jira_session(jira_base_url, jira_token)
         url = f"{base_url}/rest/api/3/project/{project_key}"
         
         response = session.get(url)
@@ -154,10 +149,10 @@ def jira_get_project(project_key: str) -> JiraProject | JiraError:
     except Exception as e:
         return JiraError(error=str(e))
 
-def jira_list_projects() -> list[JiraProject] | list[JiraError]:
+def jira_list_projects(jira_base_url: str, jira_token: str) -> list[JiraProject] | list[JiraError]:
     """List all visible projects as Pydantic models."""
     try:
-        session, base_url = _get_jira_session()
+        session, base_url = _get_jira_session(jira_base_url, jira_token)
         url = f"{base_url}/rest/api/3/project"
         
         response = session.get(url)
@@ -169,10 +164,10 @@ def jira_list_projects() -> list[JiraProject] | list[JiraError]:
     except Exception as e:
         return [JiraError(error=str(e))]
 
-def jira_get_recent_projects() -> list[JiraProject] | list[JiraError]:
+def jira_get_recent_projects(jira_base_url: str, jira_token: str) -> list[JiraProject] | list[JiraError]:
     """Get the last 20 recent projects with insight details."""
     try:
-        session, base_url = _get_jira_session()
+        session, base_url = _get_jira_session(jira_base_url, jira_token)
         url = f"{base_url}/rest/api/3/project/recent"
         params = {"expand": "insight"}
         
@@ -185,10 +180,10 @@ def jira_get_recent_projects() -> list[JiraProject] | list[JiraError]:
     except Exception as e:
         return [JiraError(error=str(e))]
 
-def jira_get_recent_user_activity(days: int = 14, max_results: int = 20) -> list[JiraIssue] | list[JiraError]:
+def jira_get_recent_user_activity(jira_base_url: str, jira_token: str, days: int = 14, max_results: int = 20) -> list[JiraIssue] | list[JiraError]:
     """
     Get issues updated in the last `days` where the user is assignee, reporter, or watcher.
     """
     jql = f"updated >= -{days}d AND (assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) ORDER BY updated DESC"
-    return jira_search_issues(jql)
+    return jira_search_issues(jql, jira_base_url, jira_token)
 

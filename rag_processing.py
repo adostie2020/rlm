@@ -25,7 +25,7 @@ def translate_query(query: str) -> Json:
     print(response)
     return response.choices[0].message.content
 
-def get_jira_context() -> str:
+def get_jira_context(jira_base_url: str, jira_token: str) -> str:
     """
     Fetches the 20 most recent active projects and user's recent activity.
     """
@@ -35,7 +35,7 @@ def get_jira_context() -> str:
     context_parts = []
     
     # 1. Recent Projects
-    projects_result = jira_get_recent_projects()
+    projects_result = jira_get_recent_projects(jira_base_url, jira_token)
     if isinstance(projects_result, list) and projects_result and isinstance(projects_result[0], JiraError):
         context_parts.append(f"Error fetching Jira projects: {projects_result[0].error}")
     elif projects_result:
@@ -54,7 +54,7 @@ def get_jira_context() -> str:
     context_parts.append("\n" + "-"*20 + "\n")
 
     # 2. Recent User Activity
-    activity_result = jira_get_recent_user_activity()
+    activity_result = jira_get_recent_user_activity(jira_base_url, jira_token)
     if isinstance(activity_result, list) and activity_result and isinstance(activity_result[0], JiraError):
         context_parts.append(f"Error fetching recent activity: {activity_result[0].error}")
     elif activity_result:
