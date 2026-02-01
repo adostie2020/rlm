@@ -112,31 +112,26 @@ async def general_completion(request: GeneralCompletionRequest):
 
 @app.post("/generate", response_model=GenerateResponse)
 async def generate(request: Request, body: GenerateRequest):
+    jira_token = request.headers.get("X-Jira-Token")
+    jira_cloud_id = request.headers.get("X-Jira-Resource-Id")
+
+    if not jira_token or not jira_cloud_id:
+        raise HTTPException(status_code=401, detail="Missing Jira credentials (X-Jira-Token, X-Jira-Resource-Id)")
+
     rlm = rlm_init(body.model)
 
     if not rlm:
         raise HTTPException(status_code=500, detail="RLM backend not initialized")
     
     try:
-        # Extract Jira credentials from headers
-        jira_token = request.headers.get("X-Jira-Token")
-        jira_cloud_id = request.headers.get("X-Jira-Resource-Id")
-        
-        jira_base_url = None
-        if jira_cloud_id:
-            jira_base_url = f"https://api.atlassian.com/ex/jira/{jira_cloud_id}"
+        jira_base_url = f"https://api.atlassian.com/ex/jira/{jira_cloud_id}"
 
         # Fetch Jira context
-        jira_context = ""
-        if jira_base_url and jira_token:
-            jira_context = get_jira_context(jira_base_url, jira_token)
-        else:
-            jira_context = "Jira credentials not provided in headers (X-Jira-Token, X-Jira-Resource-Id)."
+        jira_context = get_jira_context(jira_base_url, jira_token)
         
         # Construct dynamic setup code with wrappers
         # We wrap the functions to inject the token/url so the LLM doesn't need to know them
-        if jira_base_url and jira_token:
-            wrappers = f"""
+        wrappers = f"""
 # --- Jira Wrapper Functions Injected by Main ---
 _raw_jira_search_issues = jira_search_issues
 def jira_search_issues(jql, fields="summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"):
@@ -158,9 +153,7 @@ _raw_jira_list_projects = jira_list_projects
 def jira_list_projects():
     return _raw_jira_list_projects("{jira_base_url}", "{jira_token}")
 """
-            dynamic_setup_code = jira_setup_base + wrappers
-        else:
-            dynamic_setup_code = jira_setup_base
+        dynamic_setup_code = jira_setup_base + wrappers
 
         # Construct full prompt
         context_str = body.context if body.context is not None else ""
