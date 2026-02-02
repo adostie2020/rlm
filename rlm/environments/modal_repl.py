@@ -223,12 +223,16 @@ def FINAL_VAR(variable_name):
         return str(_locals[variable_name])
     return f"Error: Variable '{{variable_name}}' not found"
 
+def FINAL(value):
+    return str(value)
+
 _globals = {{
     "__builtins__": __builtins__,
     "__name__": "__main__",
     "llm_query": llm_query,
     "llm_query_batched": llm_query_batched,
     "FINAL_VAR": FINAL_VAR,
+    "FINAL": FINAL,
 }}
 
 code = base64.b64decode("{code_b64}").decode()
@@ -314,7 +318,9 @@ class ModalREPL(IsolatedEnv):
             self.load_context(context_payload)
 
         if setup_code:
-            self.execute_code(setup_code)
+            result = self.execute_code(setup_code)
+            if result.stderr:
+                raise RuntimeError(f"Failed to execute setup code in Modal sandbox: {result.stderr}")
 
     def setup(self):
         """Create the Modal app, sandbox, broker, and start polling."""
