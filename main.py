@@ -64,7 +64,7 @@ def rlm_init(model_name):
                 "setup_code": jira_setup_base # Default setup
             },
             max_depth=1,
-            logger=logger,
+            logger=None,
             verbose=True,
         )
     except Exception as e:
