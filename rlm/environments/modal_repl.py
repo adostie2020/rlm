@@ -11,6 +11,12 @@ from rlm.core.comms_utils import LMRequest, send_lm_request, send_lm_request_bat
 from rlm.core.types import REPLResult, RLMChatCompletion
 from rlm.environments.base_env import IsolatedEnv
 from rlm.environments.constants import APT_PACKAGES, PIP_PACKAGES
+try:
+    from tools import JIRA_TOOLS
+except ImportError:
+    JIRA_TOOLS = []
+    print("Warning: Could not import JIRA_TOOLS from tools.py")
+
 
 # =============================================================================
 # Default Modal Image
@@ -288,6 +294,7 @@ class ModalREPL(IsolatedEnv):
         context_payload: dict | list | str | None = None,
         setup_code: str | None = None,
         persistent: bool = False,
+        local_python_sources: str | None = None,
         depth: int = 1,
         **kwargs,
     ):
@@ -301,7 +308,7 @@ class ModalREPL(IsolatedEnv):
         self.timeout = timeout
         self.lm_handler_address = lm_handler_address
 
-        self.image = image or get_default_image()
+        self.image = image or get_default_image().add_local_python_source(local_python_sources)
 
         self.app = None
         self.sandbox = None
