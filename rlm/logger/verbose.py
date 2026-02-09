@@ -63,15 +63,16 @@ class VerbosePrinter:
     - Sub-calls to other models
     """
 
-    def __init__(self, enabled: bool = True):
+    def __init__(self, enabled: bool = True, console: Console | None = None):
         """
         Initialize the verbose printer.
 
         Args:
             enabled: Whether verbose printing is enabled. If False, all methods are no-ops.
+            console: Optional rich Console instance to use. If None, creates a new one.
         """
         self.enabled = enabled
-        self.console = Console() if enabled else None
+        self.console = console if console else (Console() if enabled else None)
         self._iteration_count = 0
 
     def print_header(

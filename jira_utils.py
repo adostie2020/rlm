@@ -74,7 +74,7 @@ def _get_jira_session(base_url: str, token: str):
     session.headers.update({
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "X-Jira-Token": token
+        "Authorization": f"Bearer {token}"
     })
     return session, base_url.rstrip("/")
 

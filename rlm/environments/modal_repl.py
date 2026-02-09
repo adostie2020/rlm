@@ -201,7 +201,7 @@ def save_state(state):
         try:
             dill.dumps(v)
             clean_state[k] = v
-        except:
+        except Exception as e:
             pass
     with open(STATE_FILE, "wb") as f:
         dill.dump(clean_state, f)

@@ -2,6 +2,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Callable
 
+from rich.console import Console
 from rlm.clients import BaseLM, get_client
 from rlm.core.lm_handler import LMHandler
 from rlm.core.types import (
@@ -51,6 +52,7 @@ class RLM:
         other_backend_kwargs: list[dict[str, Any]] | None = None,
         logger: RLMLogger | None = None,
         verbose: bool = False,
+        verbose_console: Console | None = None,
         persistent: bool = False,
         tools: list[dict[str, Any]] | None = None,
     ):
@@ -68,6 +70,7 @@ class RLM:
             other_backend_kwargs: The kwargs to pass to the other client backends (ordered to match other_backends).
             logger: The logger to use for the RLM.
             verbose: Whether to print verbose output in rich to console.
+            verbose_console: Optional rich Console to use for verbose output.
             persistent: If True, reuse the environment across completion() calls for multi-turn conversations.
             tools: Optional list of tools (function definitions) to pass to the language model for function calling.
         """
@@ -94,7 +97,7 @@ class RLM:
         self.max_iterations = max_iterations
         self.system_prompt = custom_system_prompt if custom_system_prompt else RLM_SYSTEM_PROMPT
         self.logger = logger
-        self.verbose = VerbosePrinter(enabled=verbose)
+        self.verbose = VerbosePrinter(enabled=verbose, console=verbose_console)
 
         # Persistence support
         self.persistent = persistent

@@ -6,10 +6,15 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from rich.console import Console
+
 from rlm import RLM
-from rlm.core.types import RLMChatCompletion
-from rlm.logger import RLMLogger
+from rlm.core.types import RLMChatCompletion, RLMIteration, RLMMetadata
+from rlm.logger import RLMLogger, VerbosePrinter
+from rlm.utils.stream_capturer import ThreadedStreamer
+from rlm.utils.rlm_utils import filter_sensitive_keys
 
 # Import tools
 try:
@@ -115,19 +120,103 @@ async def general_completion(request: GeneralCompletionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/generate", response_model=GenerateResponse)
+def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: str, setup_code: str, jira_base_url: str, jira_token: str):
+    """
+    Function to run RLM generation in a separate thread.
+    Output is captured via the passed console.
+    """
+    try:
+        backend, model_name = parse_model_string(body.model)
+        backend_kwargs = {
+            "model_name": model_name,
+            "api_key": API_KEY,
+        }
+        environment_kwargs = {
+            "setup_code": setup_code,
+            "local_python_sources": "jira_app",
+        }
+        max_depth = 1
+        
+        # Initialize VerbosePrinter manually
+        printer = VerbosePrinter(console=console, enabled=True)
+        
+        # Print Metadata (Header) - Buffered
+        metadata = RLMMetadata(
+            root_model=model_name,
+            max_depth=max_depth,
+            max_iterations=30, # Default in RLM
+            backend=backend,
+            backend_kwargs=filter_sensitive_keys(backend_kwargs),
+            environment_type="modal",
+            environment_kwargs=filter_sensitive_keys(environment_kwargs),
+            other_backends=None
+        )
+        with console.capture() as capture:
+            printer.print_metadata(metadata)
+        console.file.write(capture.get())
+
+        rlm = RLM(
+            backend=backend,
+            backend_kwargs=backend_kwargs,
+            environment="modal",
+            environment_kwargs=environment_kwargs,
+            max_depth=max_depth,
+            logger=None,
+            verbose=False, # Disable internal verbose printing
+            verbose_console=console
+        )
+
+        # Construct full prompt
+        context_str = body.context if body.context is not None else ""
+        full_prompt = context_str + f"\n\n{jira_context}"
+        root_prompt = translate_query(body.prompt)
+        if root_prompt is None:
+            root_prompt = body.prompt
+
+        iteration_count = 0
+        def on_iteration(iteration: RLMIteration):
+            nonlocal iteration_count
+            iteration_count += 1
+            
+            # Print Iteration - Buffered
+            with console.capture() as capture:
+                printer.print_iteration(iteration, iteration_count)
+            console.file.write(capture.get())
+
+        # Pass JIRA_TOOLS. Setup code is already handled in init.
+        result = rlm.completion(
+            full_prompt, 
+            root_prompt, 
+            tools=JIRA_TOOLS,
+            iteration_callback=on_iteration
+        )
+        
+        # Print Final Answer and Summary - Buffered
+        with console.capture() as capture:
+            if isinstance(result, RLMChatCompletion):
+                printer.print_final_answer(result.response)
+                printer.print_summary(iteration_count, result.execution_time, result.usage_summary.to_dict())
+            else:
+                printer.print_final_answer(result)
+        console.file.write(capture.get())
+
+    except Exception as e:
+        console.print(f"[bold red]Error in RLM execution:[/bold red] {e}")
+        traceback.print_exc()
+
+@app.post("/generate")
 async def generate(request: Request, body: GenerateRequest):
     jira_token = request.headers.get("X-Jira-Token")
     jira_cloud_id = request.headers.get("X-Jira-Resource-Id")
+    jira_base_url = f"https://api.atlassian.com/ex/jira/{jira_cloud_id}"
+    jira_context = get_jira_context(jira_base_url, jira_token)
 
-    if not jira_token or not jira_cloud_id:
+    if not jira_token or not jira_cloud_id or not jira_context:
         raise HTTPException(status_code=401, detail="Missing Jira credentials (X-Jira-Token, X-Jira-Resource-Id)")
 
     try:
-        jira_base_url = f"https://api.atlassian.com/ex/jira/{jira_cloud_id}"
 
         # Fetch Jira context
-        jira_context = get_jira_context(jira_base_url, jira_token)
         
         # Construct dynamic setup code with wrappers
         # We import from jira_app.jira_utils (available in image) and wrap to inject credentials
@@ -156,50 +245,33 @@ def jira_get_project(project_key):
 def jira_list_projects():
     return _raw_jira_list_projects("{jira_base_url}", "{jira_token}")
 """
-        backend, model_name = parse_model_string(body.model)
-        rlm = RLM(
-            backend=backend,
-            backend_kwargs={
-                "model_name": model_name,
-                "api_key": API_KEY,
-            },
-            environment="modal",
-            environment_kwargs={
-                "setup_code": setup_code,
-                "local_python_sources": "jira_app",
-            },
-            max_depth=1,
-            logger=None,
-            verbose=True,
-        )
-
-        # Construct full prompt
-        context_str = body.context if body.context is not None else ""
-        full_prompt = context_str + f"\n\n{jira_context}"
-        root_prompt = translate_query(body.prompt)
-        if root_prompt is None:
-            root_prompt = body.prompt
-
-        # Pass JIRA_TOOLS. Setup code is already handled in init.
-        result = rlm.completion(
-            full_prompt, 
-            root_prompt, 
-            tools=JIRA_TOOLS
-        )
         
-        response_text = ""
-        if isinstance(result, RLMChatCompletion):
-            response_text = result.response
-        elif isinstance(result, str):
-            response_text = result
-        else:
-            response_text = str(result)
-            
-        return GenerateResponse(result=response_text)
-    except Exception as e:
-        print(f"Error in /generate endpoint: {e}", file=sys.stderr)
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        # Initialize ThreadedStreamer with the target function
+        # We pass arguments via kwargs later or here
+        streamer = ThreadedStreamer(target=run_rlm_generation)
+        
+        # Create console that writes to the streamer's capturer
+        # Force terminal=False (default) to strip colors, or True to keep them?
+        # User asked for "what I see in my terminal", which implies colors. 
+        # But for web usage, plain text is safer unless frontend handles ANSI.
+        # We'll stick to default (likely plain text) or set force_terminal=False explicit.
+        # However, rich.Console(file=...) usually defaults force_terminal=False.
+        console = Console(file=streamer.capturer, width=100, force_terminal=False)
+        
+        # Set the arguments for the target function
+        streamer.kwargs = {
+            "console": console,
+            "body": body,
+            "jira_context": jira_context,
+            "setup_code": setup_code,
+            "jira_base_url": jira_base_url,
+            "jira_token": jira_token
+        }
+        
+        return StreamingResponse(streamer.stream_generator(), media_type="text/plain")
+
+    except Exception:
+        return {"status": "500", "detail": "internal server error"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
