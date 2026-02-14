@@ -1,6 +1,7 @@
 import os
 import requests
-from typing import Any
+from typing import Any, TypedDict
+
 from pydantic import BaseModel, Field
 
 # Environment variables expected:
@@ -64,6 +65,12 @@ class JiraComment(BaseModel):
 class JiraError(BaseModel):
     error: str
 
+
+class JiraSearchResult(TypedDict):
+    jira_issues: list[JiraIssue]
+    nextPageToken: str | None
+
+
 # --- Helper ---
 
 def _get_jira_session(base_url: str, token: str):
@@ -81,14 +88,14 @@ def _get_jira_session(base_url: str, token: str):
 # --- Tool Functions ---
 
 def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"
-) -> list[JiraIssue] | list[JiraError]:
+) -> JiraSearchResult | list[JiraError]:
     """Search for Jira issues using JQL and return validated Pydantic models."""
     try:
         session, base_url = _get_jira_session(jira_base_url, jira_token)
         url = f"{base_url}/rest/api/3/search/jql"
         params = {
             "jql": jql,
-            "maxResults": 50,
+            "maxResults": 5,
             "fields": fields
         }
         
@@ -98,8 +105,10 @@ def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, fields: st
         
         issues_data = data.get("issues", [])
         # Validate and return list of JiraIssue models
-        return [JiraIssue(**issue) for issue in issues_data]
-        
+        issues = [JiraIssue(**issue) for issue in issues_data]
+        next_token = data.get("nextPageToken")
+        return {"jira_issues": issues, "nextPageToken": next_token}
+
     except Exception as e:
         return [JiraError(error=str(e))]
 

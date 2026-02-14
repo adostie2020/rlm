@@ -3,6 +3,7 @@ import json
 import textwrap
 import threading
 import time
+from typing import Any
 
 import modal
 import requests
@@ -11,6 +12,7 @@ from rlm.core.comms_utils import LMRequest, send_lm_request, send_lm_request_bat
 from rlm.core.types import REPLResult, RLMChatCompletion
 from rlm.environments.base_env import IsolatedEnv
 from rlm.environments.constants import APT_PACKAGES, PIP_PACKAGES
+
 try:
     from tools import JIRA_TOOLS
 except ImportError:
@@ -298,10 +300,6 @@ class ModalREPL(IsolatedEnv):
         depth: int = 1,
         **kwargs,
     ):
-        if persistent:
-            raise NotImplementedError(
-                "Persistent REPLs are currently not supported for environment: ModalREPL"
-            )
         super().__init__(persistent=persistent, depth=depth, **kwargs)
 
         self.app_name = app_name
@@ -318,6 +316,10 @@ class ModalREPL(IsolatedEnv):
         self.poller_stop = threading.Event()
         self.pending_llm_calls: list[RLMChatCompletion] = []
         self._calls_lock = threading.Lock()
+
+        # Persistence counters
+        self._context_count: int = 0
+        self._history_count: int = 0
 
         self.setup()
 
@@ -432,17 +434,76 @@ class ModalREPL(IsolatedEnv):
 
         return {"error": "Unknown request type"}
 
+    def update_handler_address(self, address: tuple[str, int]) -> None:
+        """Update the LM handler address for nested LLM calls."""
+        self.lm_handler_address = address
+        # Restart poller if needed, or if it wasn't running
+        if self.broker_url and not self.poller_thread:
+            self.poller_stop.clear()
+            self.poller_thread = threading.Thread(target=self._poll_broker, daemon=True)
+            self.poller_thread.start()
+
     def load_context(self, context_payload: dict | list | str):
         """Load context into the sandbox environment."""
+        self.add_context(context_payload, 0)
+
+    def add_context(
+        self, context_payload: dict | list | str, context_index: int | None = None
+    ) -> int:
+        """Add a context variable to the sandbox."""
+        if context_index is None:
+            context_index = self._context_count
+
+        var_name = f"context_{context_index}"
+
         if isinstance(context_payload, str):
             escaped = context_payload.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
-            context_code = f'context = """{escaped}"""'
+            context_code = f'{var_name} = """{escaped}"""'
         else:
             context_json = json.dumps(context_payload)
             escaped_json = context_json.replace("\\", "\\\\").replace("'", "\\'")
-            context_code = f"import json; context = json.loads('{escaped_json}')"
+            context_code = f"import json; {var_name} = json.loads('{escaped_json}')"
+
+        # Alias context_0 as 'context'
+        if context_index == 0:
+            context_code += f"\ncontext = {var_name}"
 
         self.execute_code(context_code)
+
+        self._context_count = max(self._context_count, context_index + 1)
+        return context_index
+
+    def get_context_count(self) -> int:
+        """Return the number of contexts added."""
+        return self._context_count
+
+    def add_history(
+        self, message_history: list[dict[str, Any]], history_index: int | None = None
+    ) -> int:
+        """Add a message history variable to the sandbox."""
+        if history_index is None:
+            history_index = self._history_count
+
+        var_name = f"history_{history_index}"
+
+        history_json = json.dumps(message_history)
+        escaped_json = history_json.replace("\\", "\\\\").replace("'", "\\'")
+
+        history_code = f"import json; {var_name} = json.loads('{escaped_json}')"
+
+        # Alias history_0 as 'history'
+        if history_index == 0:
+            history_code += f"\nhistory = {var_name}"
+
+        self.execute_code(history_code)
+
+        self._history_count = max(self._history_count, history_index + 1)
+        return history_index
+
+    def get_history_count(self) -> int:
+        """Return the number of histories added."""
+        return self._history_count
+
 
     def execute_code(self, code: str) -> REPLResult:
         """Execute code in the Modal sandbox and return result."""

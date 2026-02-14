@@ -137,10 +137,14 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
         }
         max_depth = 1
         
-        # Initialize VerbosePrinter manually
+        # Initialize VerbosePrinter manually for the stream
         printer = VerbosePrinter(console=console, enabled=True)
         
-        # Print Metadata (Header) - Buffered
+        # Initialize VerbosePrinter for the server console (stdout)
+        server_console = Console()
+        server_printer = VerbosePrinter(console=server_console, enabled=True)
+        
+        # Print Metadata (Header) - Buffered for stream, direct for server
         metadata = RLMMetadata(
             root_model=model_name,
             max_depth=max_depth,
@@ -154,6 +158,7 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
         with console.capture() as capture:
             printer.print_metadata(metadata)
         console.file.write(capture.get())
+        server_printer.print_metadata(metadata)
 
         rlm = RLM(
             backend=backend,
@@ -178,10 +183,13 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
             nonlocal iteration_count
             iteration_count += 1
             
-            # Print Iteration - Buffered
+            # Print Iteration - Buffered for stream
             with console.capture() as capture:
                 printer.print_iteration(iteration, iteration_count)
             console.file.write(capture.get())
+            
+            # Print Iteration - Direct for server
+            server_printer.print_iteration(iteration, iteration_count)
 
         # Pass JIRA_TOOLS. Setup code is already handled in init.
         result = rlm.completion(
@@ -191,7 +199,7 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
             iteration_callback=on_iteration
         )
         
-        # Print Final Answer and Summary - Buffered
+        # Print Final Answer and Summary - Buffered for stream, direct for server
         with console.capture() as capture:
             if isinstance(result, RLMChatCompletion):
                 printer.print_final_answer(result.response)
@@ -199,6 +207,12 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
             else:
                 printer.print_final_answer(result)
         console.file.write(capture.get())
+        
+        if isinstance(result, RLMChatCompletion):
+            server_printer.print_final_answer(result.response)
+            server_printer.print_summary(iteration_count, result.execution_time, result.usage_summary.to_dict())
+        else:
+            server_printer.print_final_answer(result)
 
     except Exception as e:
         console.print(f"[bold red]Error in RLM execution:[/bold red] {e}")

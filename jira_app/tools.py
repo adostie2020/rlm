@@ -7,7 +7,7 @@ JIRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "jira_search_issues",
-            "description": "Search for Jira issues using JQL (Jira Query Language).",
+            "description": "Search for Jira issues using JQL (Jira Query Language) with Pagination.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -20,7 +20,8 @@ JIRA_TOOLS = [
                     }
                 },
                 "required": ["jql"]
-            }
+            },
+            "returns": "{'jira_issues': list[JiraIssue], 'nextPageToken': str | None} | error"
         }
     },
     {
