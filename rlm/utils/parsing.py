@@ -54,10 +54,26 @@ def find_final_answer(text: str, environment: "BaseEnv | None" = None) -> str | 
         return None
 
     # Check for FINAL pattern - must be at start of line
-    final_pattern = r"^\s*FINAL\((.*?)\)"
-    match = re.search(final_pattern, text, re.MULTILINE | re.DOTALL)
+    # Use regex to find start, then manual parsing to handle nested parentheses
+    start_pattern = r"^\s*FINAL\("
+    match = re.search(start_pattern, text, re.MULTILINE)
     if match:
-        return match.group(1).strip()
+        start_index = match.end()
+        open_count = 1
+        current_index = start_index
+
+        while open_count > 0 and current_index < len(text):
+            char = text[current_index]
+            if char == "(":
+                open_count += 1
+            elif char == ")":
+                open_count -= 1
+            current_index += 1
+
+        if open_count == 0:
+            return text[start_index : current_index - 1].strip()
+        else:
+            return text[start_index:].strip()
 
     return None
 
