@@ -40,25 +40,9 @@ def find_final_answer(text: str, environment: "BaseEnv | None" = None) -> str | 
     Returns:
         The final answer string, or None if no final answer pattern is found
     """
-    # Check for FINAL_VAR pattern first - must be at start of line
-    final_var_pattern = r"^\s*FINAL_VAR\((.*?)\)"
-    match = re.search(final_var_pattern, text, re.MULTILINE | re.DOTALL)
-    if match:
-        variable_name = match.group(1).strip().strip('"').strip("'")
-        if environment is not None:
-            result = environment.execute_code(f"print(FINAL_VAR({variable_name!r}))")
-            final_answer = result.stdout.strip()
-            if final_answer == "":
-                final_answer = result.stderr.strip() or ""
-            return final_answer
-        return None
-
-    # Check for FINAL pattern - must be at start of line
-    # Use regex to find start, then manual parsing to handle nested parentheses
-    start_pattern = r"^\s*FINAL\("
-    match = re.search(start_pattern, text, re.MULTILINE)
-    if match:
-        start_index = match.end()
+    
+    # Helper to handle nested parentheses cleanly
+    def extract_content(start_index: int) -> str:
         open_count = 1
         current_index = start_index
 
@@ -71,12 +55,32 @@ def find_final_answer(text: str, environment: "BaseEnv | None" = None) -> str | 
             current_index += 1
 
         if open_count == 0:
-            return text[start_index : current_index - 1].strip()
+            return text[start_index : current_index - 1]
         else:
-            return text[start_index:].strip()
+            return text[start_index:]
+
+    # Check for FINAL_VAR pattern first - must be at start of line
+    final_var_start_pattern = r"^\s*FINAL_VAR\("
+    match = re.search(final_var_start_pattern, text, re.MULTILINE)
+    if match:
+        raw_content = extract_content(match.end())
+        variable_name = raw_content.strip().strip('"').strip("'")
+        
+        if environment is not None:
+            result = environment.execute_code(f"print(FINAL_VAR({variable_name!r}))")
+            final_answer = result.stdout.strip()
+            if final_answer == "":
+                final_answer = result.stderr.strip() or ""
+            return final_answer
+        return None
+
+    # Check for FINAL pattern - must be at start of line
+    start_pattern = r"^\s*FINAL\("
+    match = re.search(start_pattern, text, re.MULTILINE)
+    if match:
+        return extract_content(match.end()).strip()
 
     return None
-
 
 def format_iteration(
     iteration: RLMIteration, max_character_length: int = 20000

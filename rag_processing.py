@@ -26,10 +26,11 @@ def translate_query(query: str) -> Json:
     print(response)
     return response.choices[0].message.content + "When you have completed processing, output a final answer."
 
-def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str | None = None) -> str:
+def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str | None = None) -> str | None:
     """
     Fetches the 20 most recent active projects, user's recent activity, and open issues.
     Supports pagination for open issues via `next_page_token`.
+    Returns None if any of the Jira API calls fail.
     """
     if jira_get_recent_projects is None or jira_get_recent_user_activity is None or jira_get_open_user_issues is None:
         return "Jira tools not available."
@@ -47,7 +48,7 @@ def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str |
     
     projects_result = jira_get_recent_projects(jira_base_url, jira_token)
     if isinstance(projects_result, list) and projects_result and isinstance(projects_result[0], JiraError):
-        context_parts.append(f"Error fetching Jira projects: {projects_result[0].error}")
+        return None
     elif projects_result:
         projects_str = ["Recent Jira Projects:"]
         for project in projects_result:
@@ -66,7 +67,7 @@ def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str |
     # 2. Recent User Activity
     activity_result = jira_get_recent_user_activity(jira_base_url, jira_token)
     if isinstance(activity_result, list) and activity_result and isinstance(activity_result[0], JiraError):
-        context_parts.append(f"Error fetching recent activity: {activity_result[0].error}")
+        return None
     elif activity_result:
         activity_str = ["Recent User Activity (Last 14 days):"]
         for issue in activity_result:
@@ -83,7 +84,7 @@ def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str |
     # 3. Open Issues (Assigned/Reported)
     open_issues_result = jira_get_open_user_issues(jira_base_url, jira_token, start_at=start_at, max_results=max_results)
     if isinstance(open_issues_result, list) and open_issues_result and isinstance(open_issues_result[0], JiraError):
-        context_parts.append(f"Error fetching open issues: {open_issues_result[0].error}")
+        return None
     elif open_issues_result:
         open_issues_str = [f"Open Issues (Assigned/Reported) - Page starting at {start_at}:"]
         for issue in open_issues_result:

@@ -262,7 +262,7 @@ def jira_list_projects():
         
         # Initialize ThreadedStreamer with the target function
         # We pass arguments via kwargs later or here
-        streamer = ThreadedStreamer(target=run_rlm_generation)
+        streamer = ThreadedStreamer(target=run_rlm_generation, protocol="vercel_data_stream")
         
         # Create console that writes to the streamer's capturer
         # Force terminal=False (default) to strip colors, or True to keep them?
@@ -282,7 +282,7 @@ def jira_list_projects():
             "jira_token": jira_token
         }
         
-        return StreamingResponse(streamer.stream_generator(), media_type="text/plain")
+        return StreamingResponse(streamer.stream_generator(), media_type="text/event-stream")
 
     except Exception:
         return {"status": "500", "detail": "internal server error"}

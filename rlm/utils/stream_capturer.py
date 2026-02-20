@@ -26,9 +26,10 @@ class ThreadedStreamer:
     Runs a target function in a background thread and yields captured output
     from a queue as a generator.
     """
-    def __init__(self, target: Callable, *args, **kwargs):
+    def __init__(self, target: Callable, *args, protocol: str = "text", **kwargs):
         self.queue = queue.Queue()
         self.target = target
+        self.protocol = protocol
         self.args = args
         self.kwargs = kwargs
         self.capturer = StreamCapturer(self.queue)
@@ -55,7 +56,7 @@ class ThreadedStreamer:
     def stream_generator(self) -> Generator[str, None, None]:
         """
         Yields chunks of text from the queue until the thread finishes and queue is empty.
-        Adheres to Vercel AI SDK Data Stream Protocol text parts (0:"text").
+        Adheres to Vercel AI SDK Data Stream Protocol.
         """
         self.thread.start()
         
@@ -63,13 +64,16 @@ class ThreadedStreamer:
             try:
                 # Wait for data with a timeout to check finished status
                 chunk = self.queue.get(timeout=0.1)
-                # Format as Vercel AI SDK Data Stream text part
-                # 0:"encoded_text"\n
                 if chunk:
-                    # JSON encode the string to handle newlines/quotes safely
                     import json
-                    encoded_chunk = json.dumps(chunk)
-                    yield f'0:{encoded_chunk}\n'
+                    if self.protocol == "vercel_data_stream":
+                        # Vercel Data Stream Protocol
+                        yield f'data: {json.dumps({"type": "text", "text": chunk})}\n\n'
+                    else:
+                        # Default / Legacy "text" behavior (Vercel Stream Data - v1)
+                        # 0:"encoded_text"\n
+                        encoded_chunk = json.dumps(chunk)
+                        yield f'0:{encoded_chunk}\n'
             except queue.Empty:
                 continue
         
@@ -77,3 +81,6 @@ class ThreadedStreamer:
             # Optionally yield error part? 
             # For now we just logged it to stream.
             pass
+            
+        if self.protocol == "vercel_data_stream":
+            yield 'data: [DONE]\n\n'
