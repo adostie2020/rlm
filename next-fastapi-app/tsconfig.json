@@ -27,7 +27,6 @@
         "./*"
       ]
     },
-    "composite": true,
     "noEmit": true
   },
   "include": [
@@ -38,16 +37,5 @@
   ],
   "exclude": [
     "node_modules"
-  ],
-  "references": [
-    {
-      "path": "../../packages/ai"
-    },
-    {
-      "path": "../../packages/react"
-    },
-    {
-      "path": "../../packages/ai"
-    }
   ]
 }

@@ -1,9 +1,4 @@
-import { Metadata } from 'next';
-
-export const metadata: Metadata = {
-  title: 'useChat',
-};
-
+'use client'
 import { SessionProvider } from 'next-auth/react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {

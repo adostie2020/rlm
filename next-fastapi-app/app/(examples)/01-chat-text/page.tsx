@@ -10,13 +10,19 @@ export default function Page() {
   const [input, setInput] = useState('');
   const { data: session } = useSession();
 
+  const headers: Record<string, string> = {};
+  const user = session?.user as any;
+  if (user?.jiraAccessToken) {
+    headers['X-Jira-Token'] = user.jiraAccessToken;
+  }
+  if (user?.jiraCloudId) {
+    headers['X-Jira-Resource-Id'] = user.jiraCloudId;
+  }
+
   const { messages, sendMessage, status } = useChat({
-    headers: {
-      ...(session?.user?.jiraAccessToken && { 'X-Jira-Token': session.user.jiraAccessToken }),
-      ...(session?.user?.jiraCloudId && { 'X-Jira-Resource-Id': session.user.jiraCloudId }),
-    },
     transport: new TextStreamChatTransport({
       api: '/api/chat?protocol=text',
+      headers,
     }),
   });
   const scrollToNextSection = () => {
@@ -80,9 +86,23 @@ export default function Page() {
         }}
         className="fixed bottom-0 bg-white flex flex-col w-full border-t"
       >
-        <button type="button" onClick={() => scrollToNextSection()}>
-          Go to Next Message
-        </button>
+        <div className="flex justify-between items-center px-4 pt-2">
+          <button type="button" onClick={() => scrollToNextSection()} className="text-sm rounded border px-2 py-1 bg-zinc-100/50">
+            Go to Next Message
+          </button>
+          {!session ? (
+            <button type="button" onClick={() => signIn('atlassian')} className="text-sm bg-[#0052CC] text-white px-3 py-1 rounded">
+              Login with Jira
+            </button>
+          ) : (
+            <div className="flex gap-2 items-center text-sm">
+              <span className="text-zinc-500">Authenticated JIRA</span>
+              <button type="button" onClick={() => signOut()} className="text-xs text-zinc-400 hover:text-zinc-600">
+                Log out
+              </button>
+            </div>
+          )}
+        </div>
         <input
           value={input}
           placeholder="Why is the sky blue?"
