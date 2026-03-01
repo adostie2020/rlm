@@ -2,7 +2,7 @@ import type { NextAuthConfig } from "next-auth";
 
 export const authConfig = {
   pages: {
-    signIn: "/login",
+    // signIn: "/login", // commented out because app/login/page.tsx does not exist
     newUser: "/",
   },
   providers: [
