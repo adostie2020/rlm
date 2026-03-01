@@ -1,5 +1,21 @@
-import os
 import sys
+import os
+from pathlib import Path
+
+# Force UTF-8 for stdout/stderr on Windows to avoid cp1252 errors with Rich
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except AttributeError:
+        # Python < 3.7 or other issues
+        pass
+
+# Add root directory to sys.path to allow importing rlm, jira_app, etc.
+# We are in next-fastapi-app/api/index.py, so root is ../../
+root_path = Path(__file__).parent.parent.parent
+sys.path.append(str(root_path))
+
 import traceback
 from typing import Optional, List
 import uvicorn
@@ -24,10 +40,15 @@ except ImportError:
     print("Warning: Could not import JIRA_TOOLS from tools.py")
 
 # Load environment variables
+# Load root .env first
+if os.path.exists(str(root_path / ".env.local")):
+    load_dotenv(str(root_path / ".env.local"))
+elif os.path.exists(str(root_path / ".env")):
+    load_dotenv(str(root_path / ".env"))
+
+# Load next-fastapi-app specific env (override)
 if os.path.exists(".env.local"):
-    load_dotenv(".env.local")
-else:
-    load_dotenv()
+    load_dotenv(".env.local", override=True)
 
 from rag_processing import translate_query, get_jira_context
 
@@ -42,7 +63,7 @@ app.add_middleware(
 )
 
 # Initialize RLM
-logger = RLMLogger(log_dir="./logs")
+logger = RLMLogger(log_dir=str(root_path / "logs"))
 
 API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -51,17 +72,8 @@ class GenerateRequest(BaseModel):
     context: Optional[str] = None
     model: str
 
-class GeneralCompletionRequest(BaseModel):
-    root_prompt: str
-    prompt: str
-    model: str
-
 class GenerateResponse(BaseModel):
     result: str
-
-@app.get("/")
-def read_root():
-    return {"status": "ok", "service": "RLM API"}
 
 def parse_model_string(model_str: str) -> tuple[str, str]:
     if model_str.startswith("openai/"):
@@ -73,7 +85,6 @@ def parse_model_string(model_str: str) -> tuple[str, str]:
     elif model_str.startswith("azure/"):
         return "azure_openai", model_str.replace("azure/", "", 1)
     
-    # Fallback/Legacy guessing
     if model_str.startswith("gpt"):
         return "openai", model_str
     elif model_str.startswith("claude"):
@@ -84,41 +95,6 @@ def parse_model_string(model_str: str) -> tuple[str, str]:
         return "azure_openai", model_str
     
     return "openai", model_str
-
-@app.post("/general_completion", response_model=GenerateResponse)
-async def general_completion(request: GeneralCompletionRequest):
-    backend, model_name = parse_model_string(request.model)
-    
-    try:
-        rlm = RLM(
-            backend=backend,
-            backend_kwargs={
-                "model_name": model_name,
-                "api_key": API_KEY,
-            },
-            environment="modal",
-            environment_kwargs={
-                "local_python_sources": "jira_app",
-            },
-            max_depth=1,
-            logger=None,
-            verbose=True,
-        )
-        
-        # Call completion without tools and without extra context logic
-        result = rlm.completion(request.prompt, request.root_prompt, tools=[])
-        
-        response_text = ""
-        if isinstance(result, RLMChatCompletion):
-            response_text = result.response
-        elif isinstance(result, str):
-            response_text = result
-        else:
-            response_text = str(result)
-            
-        return GenerateResponse(result=response_text)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: str, setup_code: str, jira_base_url: str, jira_token: str):
     """
@@ -137,27 +113,21 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
         }
         max_depth = 1
         
-        # Initialize VerbosePrinter manually for the stream
         printer = VerbosePrinter(console=console, enabled=True)
-        
-        # Initialize VerbosePrinter for the server console (stdout)
         server_console = Console()
         server_printer = VerbosePrinter(console=server_console, enabled=True)
         
-        # Print Metadata (Header) - Buffered for stream, direct for server
         metadata = RLMMetadata(
             root_model=model_name,
             max_depth=max_depth,
-            max_iterations=30, # Default in RLM
+            max_iterations=30,
             backend=backend,
             backend_kwargs=filter_sensitive_keys(backend_kwargs),
             environment_type="modal",
             environment_kwargs=filter_sensitive_keys(environment_kwargs),
             other_backends=None
         )
-        with console.capture() as capture:
-            printer.print_metadata(metadata)
-        console.file.write(capture.get())
+        printer.print_metadata(metadata)
         server_printer.print_metadata(metadata)
 
         rlm = RLM(
@@ -167,11 +137,10 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
             environment_kwargs=environment_kwargs,
             max_depth=max_depth,
             logger=None,
-            verbose=False, # Disable internal verbose printing
+            verbose=False,
             verbose_console=console
         )
 
-        # Construct full prompt
         context_str = body.context if body.context is not None else ""
         full_prompt = context_str + f"\n\n{jira_context}"
         root_prompt = translate_query(body.prompt)
@@ -183,15 +152,10 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
             nonlocal iteration_count
             iteration_count += 1
             
-            # Print Iteration - Buffered for stream
-            with console.capture() as capture:
-                printer.print_iteration(iteration, iteration_count)
-            console.file.write(capture.get())
-            
-            # Print Iteration - Direct for server
+            printer.print_iteration(iteration, iteration_count)
+            server_printer.print_iteration(iteration, iteration_count)
             server_printer.print_iteration(iteration, iteration_count)
 
-        # Pass JIRA_TOOLS. Setup code is already handled in init.
         result = rlm.completion(
             full_prompt, 
             root_prompt, 
@@ -199,14 +163,11 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
             iteration_callback=on_iteration
         )
         
-        # Print Final Answer and Summary - Buffered for stream, direct for server
-        with console.capture() as capture:
-            if isinstance(result, RLMChatCompletion):
-                printer.print_final_answer(result.response)
-                printer.print_summary(iteration_count, result.execution_time, result.usage_summary.to_dict())
-            else:
-                printer.print_final_answer(result)
-        console.file.write(capture.get())
+        if isinstance(result, RLMChatCompletion):
+            printer.print_final_answer(result.response)
+            printer.print_summary(iteration_count, result.execution_time, result.usage_summary.to_dict())
+        else:
+            printer.print_final_answer(result)
         
         if isinstance(result, RLMChatCompletion):
             server_printer.print_final_answer(result.response)
@@ -309,6 +270,10 @@ def jira_list_projects():
 
     streamer = ThreadedStreamer(target=run_rlm_generation, protocol=protocol)
     # Force terminal=False to strip colors for clean stream, OR True if frontend expects ANSI
+    # The user said "what I see in my terminal", so maybe True?
+    # But usually frontend components won't parse ANSI unless specifically designed (like xterm.js).
+    # The default Next.js example doesn't seem to have ANSI parser.
+    # I'll default to False to be safe, but keep width large.
     console = Console(file=streamer.capturer, width=100, force_terminal=False)
     
     streamer.kwargs = {

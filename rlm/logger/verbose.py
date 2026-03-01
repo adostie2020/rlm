@@ -75,6 +75,22 @@ class VerbosePrinter:
         self.console = console if console else (Console() if enabled else None)
         self._iteration_count = 0
 
+    def _symbol(self, unicode_char: str, ascii_char: str) -> str:
+        """Return the appropriate symbol based on console encoding."""
+        if not self.console:
+            return ascii_char
+        
+        # Check encoding
+        encoding = getattr(self.console, "encoding", "utf-8").lower()
+        if "utf-8" in encoding or "utf8" in encoding:
+            return unicode_char
+            
+        # Check legacy windows flag if available
+        if getattr(self.console, "legacy_windows", False):
+            return ascii_char
+            
+        return ascii_char
+
     def print_header(
         self,
         backend: str,
@@ -90,9 +106,11 @@ class VerbosePrinter:
 
         # Main title
         title = Text()
-        title.append("◆ ", style=STYLE_ACCENT)
+        symbol = self._symbol("◆ ", "* ")
+        title.append(symbol, style=STYLE_ACCENT)
         title.append("RLM", style=Style(color=COLORS["primary"], bold=True))
-        title.append(" ━ Recursive Language Model", style=STYLE_MUTED)
+        dash = self._symbol(" ━ ", " - ")
+        title.append(f"{dash}Recursive Language Model", style=STYLE_MUTED)
 
         # Configuration table
         config_table = Table(
@@ -173,10 +191,11 @@ class VerbosePrinter:
 
         self._iteration_count = iteration
 
+        char = self._symbol("─", "-")
         rule = Rule(
             Text(f" Iteration {iteration} ", style=STYLE_PRIMARY),
             style=COLORS["border"],
-            characters="─",
+            characters=char,
         )
         self.console.print(rule)
 
@@ -187,7 +206,8 @@ class VerbosePrinter:
 
         # Header with timing
         header = Text()
-        header.append("◇ ", style=STYLE_ACCENT)
+        symbol = self._symbol("◇ ", "* ")
+        header.append(symbol, style=STYLE_ACCENT)
         header.append("LLM Response", style=STYLE_PRIMARY)
         if iteration_time:
             header.append(f"  ({iteration_time:.2f}s)", style=STYLE_MUTED)
@@ -218,7 +238,8 @@ class VerbosePrinter:
 
         # Header
         header = Text()
-        header.append("▸ ", style=STYLE_SUCCESS)
+        symbol = self._symbol("▸ ", "> ")
+        header.append(symbol, style=STYLE_SUCCESS)
         header.append("Code Execution", style=Style(color=COLORS["success"], bold=True))
         if result.execution_time:
             header.append(f"  ({result.execution_time:.3f}s)", style=STYLE_MUTED)
@@ -251,7 +272,8 @@ class VerbosePrinter:
         # Sub-calls summary
         if result.rlm_calls:
             calls_text = Text()
-            calls_text.append(f"\n↳ {len(result.rlm_calls)} sub-call(s)", style=STYLE_SECONDARY)
+            arrow = self._symbol("↳ ", "-> ")
+            calls_text.append(f"\n{arrow}{len(result.rlm_calls)} sub-call(s)", style=STYLE_SECONDARY)
             content_parts.append(calls_text)
 
         panel = Panel(
@@ -276,7 +298,8 @@ class VerbosePrinter:
 
         # Header
         header = Text()
-        header.append("  ↳ ", style=STYLE_SECONDARY)
+        symbol = self._symbol("  ↳ ", "  -> ")
+        header.append(symbol, style=STYLE_SECONDARY)
         header.append("Sub-call: ", style=STYLE_SECONDARY)
         header.append(_to_str(model), style=STYLE_ACCENT)
         if execution_time:
@@ -332,7 +355,8 @@ class VerbosePrinter:
 
         # Title
         title = Text()
-        title.append("★ ", style=STYLE_WARNING)
+        symbol = self._symbol("★ ", "* ")
+        title.append(symbol, style=STYLE_WARNING)
         title.append("Final Answer", style=Style(color=COLORS["warning"], bold=True))
 
         # Answer content
@@ -387,8 +411,9 @@ class VerbosePrinter:
                 summary_table.add_row("Output Tokens", f"{total_output:,}")
 
         # Wrap in rule
+        char = self._symbol("═", "=")
         self.console.print()
-        self.console.print(Rule(style=COLORS["border"], characters="═"))
+        self.console.print(Rule(style=COLORS["border"], characters=char))
         self.console.print(summary_table, justify="center")
-        self.console.print(Rule(style=COLORS["border"], characters="═"))
+        self.console.print(Rule(style=COLORS["border"], characters=char))
         self.console.print()

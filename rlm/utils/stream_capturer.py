@@ -1,6 +1,7 @@
 import queue
 import threading
 import time
+import re
 from typing import Any, Callable, Generator
 
 class StreamCapturer:
@@ -13,10 +14,15 @@ class StreamCapturer:
 
     def write(self, text: str):
         if text:
+            # Pass through text directly without stripping
             self.queue.put(text)
 
     def flush(self):
         pass
+
+    @property
+    def encoding(self):
+        return 'utf-8'
 
     def isatty(self):
         return False
@@ -69,11 +75,14 @@ class ThreadedStreamer:
                     if self.protocol == "vercel_data_stream":
                         # Vercel Data Stream Protocol
                         yield f'data: {json.dumps({"type": "text", "text": chunk})}\n\n'
-                    else:
+                    elif self.protocol == "data":
                         # Default / Legacy "text" behavior (Vercel Stream Data - v1)
                         # 0:"encoded_text"\n
                         encoded_chunk = json.dumps(chunk)
                         yield f'0:{encoded_chunk}\n'
+                    else:
+                        # 'text' or arbitrary protocols for TextStreamChatTransport
+                        yield chunk
             except queue.Empty:
                 continue
         
