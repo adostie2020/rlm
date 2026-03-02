@@ -61,7 +61,32 @@ export default function Page() {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-col w-full max-w-screen-lg mx-auto gap-2 p-4 md:w-[120ch]">
+      <div className="flex flex-col w-full max-w-screen-lg mx-auto gap-4 p-4 md:w-[120ch]">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 text-amber-900 text-sm">
+          <div className="mt-0.5">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+              className="w-4 h-4"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+              />
+            </svg>
+          </div>
+          <div>
+            <p className="font-medium">Backend spin-down notice</p>
+            <p className="opacity-80">
+              This demo uses a render backend that may spin down when inactive.
+              Initial requests can take up to 50 seconds to receive.
+            </p>
+          </div>
+        </div>
         {messages.map(message => (
           <section key={message.id} data-role={message.role}>
             <div key={message.id} className="flex flex-row gap-2">
