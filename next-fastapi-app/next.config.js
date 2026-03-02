@@ -4,11 +4,11 @@ const nextConfig = {
     return {
       fallback: [
         {
-          source: '/api/:path*',
+          source: '/api/:path((?!auth).*)',
           destination:
             process.env.NODE_ENV === 'development'
-              ? 'http://127.0.0.1:8000/api/:path*'
-              : `${process.env.RLM_BACKEND_URL || 'https://your-render-backend-url.onrender.com'}/api/:path*`,
+              ? 'http://127.0.0.1:8000/api/:path'
+              : `${process.env.RLM_BACKEND_URL || 'https://your-render-backend-url.onrender.com'}/api/:path`,
         },
         {
           source: '/docs',
