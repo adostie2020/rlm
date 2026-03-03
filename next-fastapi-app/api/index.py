@@ -250,16 +250,24 @@ from jira_app.jira_utils import (
     jira_list_projects as _raw_jira_list_projects
 )
 
-def jira_search_issues(jql, fields="summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"):
+def jira_search_issues(jql: str, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"):
+    if isinstance(jql, dict):
+        jql = jql.get('jql', '')
     return _raw_jira_search_issues(jql, "{jira_base_url}", "{jira_token}", fields)
 
-def jira_get_issue(issue_key):
+def jira_get_issue(issue_key: str):
+    if isinstance(issue_key, dict):
+        issue_key = issue_key.get('issue_key', '')
     return _raw_jira_get_issue(issue_key, "{jira_base_url}", "{jira_token}")
 
-def jira_get_issue_comments(issue_key):
+def jira_get_issue_comments(issue_key: str):
+    if isinstance(issue_key, dict):
+        issue_key = issue_key.get('issue_key', '')
     return _raw_jira_get_issue_comments(issue_key, "{jira_base_url}", "{jira_token}")
 
-def jira_get_project(project_key):
+def jira_get_project(project_key: str):
+    if isinstance(project_key, dict):
+        project_key = project_key.get('project_key', '')
     return _raw_jira_get_project(project_key, "{jira_base_url}", "{jira_token}")
 
 def jira_list_projects():

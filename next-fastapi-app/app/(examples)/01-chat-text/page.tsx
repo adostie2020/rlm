@@ -7,8 +7,21 @@ import { useState } from 'react';
 import { useSession, signIn, signOut } from 'next-auth/react';
 
 export default function Page() {
+  const { data: session, status: sessionStatus } = useSession();
+
+  if (sessionStatus === 'loading') {
+    return (
+      <div className="flex h-[50vh] items-center justify-center">
+        <div className="text-zinc-500 animate-pulse">Loading session...</div>
+      </div>
+    );
+  }
+
+  return <ChatInterface session={session} />;
+}
+
+function ChatInterface({ session }: { session: any }) {
   const [input, setInput] = useState('');
-  const { data: session } = useSession();
 
   const headers: Record<string, string> = {};
   const user = session?.user as any;
@@ -61,6 +74,12 @@ export default function Page() {
 
   return (
     <div className="flex flex-col gap-2">
+      {/* Session Debug Panel */}
+      <div className="bg-zinc-100 border border-zinc-200 p-2 mx-auto mt-2 w-full max-w-screen-lg md:w-[120ch] text-xs font-mono rounded overflow-hidden">
+        <div>Session Jira Token present: {user?.jiraAccessToken ? 'YES' : 'NO'}</div>
+        <div>Session Cloud ID: {user?.jiraCloudId || 'NONE'}</div>
+        <div className="truncate">Prepared Headers: {JSON.stringify(headers)}</div>
+      </div>
       <div className="flex flex-col w-full max-w-screen-lg mx-auto gap-4 p-4 md:w-[120ch]">
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 text-amber-900 text-sm">
           <div className="mt-0.5">

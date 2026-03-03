@@ -36,8 +36,21 @@ export const {
       if (account && account.provider === "atlassian") {
         token.jiraAccessToken = account.access_token;
         token.jiraRefreshToken = account.refresh_token as string;
-        // The Atlassian providerAccountId is often the Cloud ID. We will store it.
-        token.jiraCloudId = account.providerAccountId;
+
+        try {
+          const res = await fetch("https://api.atlassian.com/oauth/token/accessible-resources", {
+            headers: { Authorization: `Bearer ${account.access_token}` },
+          });
+          const resources = await res.json();
+          if (resources && resources.length > 0) {
+            token.jiraCloudId = resources[0].id;
+          } else {
+            token.jiraCloudId = account.providerAccountId;
+          }
+        } catch (err) {
+          console.error("Failed to fetch Atlassian resources", err);
+          token.jiraCloudId = account.providerAccountId;
+        }
       }
 
       if (trigger === "update" && session) {
