@@ -43,9 +43,12 @@ export const {
           });
           const resources = await res.json();
           if (resources && resources.length > 0) {
-            token.jiraCloudId = resources[0].id;
+            token.jiraCloudId = resources.map((resource: any) => ({
+              id: resource.id,
+              name: resource.name,
+            }));
           } else {
-            token.jiraCloudId = account.providerAccountId;
+            throw new Error("No Atlassian resources found");
           }
         } catch (err) {
           console.error("Failed to fetch Atlassian resources", err);
@@ -68,7 +71,7 @@ export const {
         session.user.type = token.type as UserType;
         session.user.jiraAccessToken = token.jiraAccessToken as string | undefined;
         session.user.jiraRefreshToken = token.jiraRefreshToken as string | undefined;
-        session.user.jiraCloudId = token.jiraCloudId as string | undefined;
+        session.user.jiraCloudId = token.jiraCloudId as any;
       }
 
       return session;

@@ -14,7 +14,8 @@ if sys.platform == "win32":
 # Add root directory to sys.path to allow importing rlm, jira_app, etc.
 # We are in next-fastapi-app/api/index.py, so root is ../../
 root_path = Path(__file__).parent.parent.parent
-sys.path.append(str(root_path))
+sys.path.insert(0, str(root_path))
+
 
 import traceback
 from typing import Optional, List
@@ -143,6 +144,9 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
 
         context_str = body.context if body.context is not None else ""
         full_prompt = context_str + f"\n\n{jira_context}"
+        print(f"[DEBUG] Jira Context Length: {len(jira_context)}")
+        print(f"[DEBUG] Full Prompt (first 500 chars): {full_prompt[:500]}...")
+        
         root_prompt = translate_query(body.prompt)
         if root_prompt is None:
             root_prompt = body.prompt
@@ -250,10 +254,10 @@ from jira_app.jira_utils import (
     jira_list_projects as _raw_jira_list_projects
 )
 
-def jira_search_issues(jql: str, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"):
+def jira_search_issues(jql: str, start_at: int = 0, max_results: int = 20, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"):
     if isinstance(jql, dict):
         jql = jql.get('jql', '')
-    return _raw_jira_search_issues(jql, "{jira_base_url}", "{jira_token}", fields)
+    return _raw_jira_search_issues(jql, "{jira_base_url}", "{jira_token}", start_at, max_results, fields)
 
 def jira_get_issue(issue_key: str):
     if isinstance(issue_key, dict):

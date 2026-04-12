@@ -144,20 +144,17 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
         server_console = Console()
         server_printer = VerbosePrinter(console=server_console, enabled=True)
         
-        # Print Metadata (Header) - Buffered for stream, direct for server
         metadata = RLMMetadata(
             root_model=model_name,
             max_depth=max_depth,
-            max_iterations=30, # Default in RLM
+            max_iterations=30,
             backend=backend,
             backend_kwargs=filter_sensitive_keys(backend_kwargs),
             environment_type="modal",
             environment_kwargs=filter_sensitive_keys(environment_kwargs),
             other_backends=None
         )
-        with console.capture() as capture:
-            printer.print_metadata(metadata)
-        console.file.write(capture.get())
+        printer.print_metadata(metadata)
         server_printer.print_metadata(metadata)
 
         rlm = RLM(
@@ -171,7 +168,6 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
             verbose_console=console
         )
 
-        # Construct full prompt
         context_str = body.context if body.context is not None else ""
         full_prompt = context_str + f"\n\n{jira_context}"
         root_prompt = translate_query(body.prompt)
@@ -183,15 +179,10 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
             nonlocal iteration_count
             iteration_count += 1
             
-            # Print Iteration - Buffered for stream
-            with console.capture() as capture:
-                printer.print_iteration(iteration, iteration_count)
-            console.file.write(capture.get())
-            
-            # Print Iteration - Direct for server
+            printer.print_iteration(iteration, iteration_count)
+            server_printer.print_iteration(iteration, iteration_count)
             server_printer.print_iteration(iteration, iteration_count)
 
-        # Pass JIRA_TOOLS. Setup code is already handled in init.
         result = rlm.completion(
             full_prompt, 
             root_prompt, 
@@ -199,14 +190,11 @@ def run_rlm_generation(console: Console, body: GenerateRequest, jira_context: st
             iteration_callback=on_iteration
         )
         
-        # Print Final Answer and Summary - Buffered for stream, direct for server
-        with console.capture() as capture:
-            if isinstance(result, RLMChatCompletion):
-                printer.print_final_answer(result.response)
-                printer.print_summary(iteration_count, result.execution_time, result.usage_summary.to_dict())
-            else:
-                printer.print_final_answer(result)
-        console.file.write(capture.get())
+        if isinstance(result, RLMChatCompletion):
+            printer.print_final_answer(result.response)
+            printer.print_summary(iteration_count, result.execution_time, result.usage_summary.to_dict())
+        else:
+            printer.print_final_answer(result)
         
         if isinstance(result, RLMChatCompletion):
             server_printer.print_final_answer(result.response)
@@ -289,16 +277,24 @@ from jira_app.jira_utils import (
     jira_list_projects as _raw_jira_list_projects
 )
 
-def jira_search_issues(jql, fields="summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"):
-    return _raw_jira_search_issues(jql, "{jira_base_url}", "{jira_token}", fields)
+def jira_search_issues(jql: str, start_at: int = 0, max_results: int = 20, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"):
+    if isinstance(jql, dict):
+        jql = jql.get('jql', '')
+    return _raw_jira_search_issues(jql, "{jira_base_url}", "{jira_token}", start_at, max_results, fields)
 
-def jira_get_issue(issue_key):
+def jira_get_issue(issue_key: str):
+    if isinstance(issue_key, dict):
+        issue_key = issue_key.get('issue_key', '')
     return _raw_jira_get_issue(issue_key, "{jira_base_url}", "{jira_token}")
 
-def jira_get_issue_comments(issue_key):
+def jira_get_issue_comments(issue_key: str):
+    if isinstance(issue_key, dict):
+        issue_key = issue_key.get('issue_key', '')
     return _raw_jira_get_issue_comments(issue_key, "{jira_base_url}", "{jira_token}")
 
-def jira_get_project(project_key):
+def jira_get_project(project_key: str):
+    if isinstance(project_key, dict):
+        project_key = project_key.get('project_key', '')
     return _raw_jira_get_project(project_key, "{jira_base_url}", "{jira_token}")
 
 def jira_list_projects():

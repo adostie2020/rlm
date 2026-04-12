@@ -87,7 +87,7 @@ def _get_jira_session(base_url: str, token: str):
 
 # --- Tool Functions ---
 
-def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"
+def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, start_at: int = 0, max_results: int = 20, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"
 ) -> JiraSearchResult | list[JiraError]:
     """Search for Jira issues using JQL and return validated Pydantic models."""
     try:
@@ -95,7 +95,8 @@ def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, fields: st
         url = f"{base_url}/rest/api/3/search/jql"
         params = {
             "jql": jql,
-            "maxResults": 5,
+            "startAt": start_at,
+            "maxResults": max_results,
             "fields": fields
         }
         
@@ -162,13 +163,15 @@ def jira_list_projects(jira_base_url: str, jira_token: str) -> list[JiraProject]
     """List all visible projects as Pydantic models."""
     try:
         session, base_url = _get_jira_session(jira_base_url, jira_token)
-        url = f"{base_url}/rest/api/3/project"
+        url = f"{base_url}/rest/api/3/project/search"
         
         response = session.get(url)
         response.raise_for_status()
         data = response.json()
         
-        return [JiraProject(**proj) for proj in data]
+        projects_data = data.get("values", [])
+        return [JiraProject(**proj) for proj in projects_data]
+
         
     except Exception as e:
         return [JiraError(error=str(e))]
@@ -189,10 +192,17 @@ def jira_get_recent_projects(jira_base_url: str, jira_token: str) -> list[JiraPr
     except Exception as e:
         return [JiraError(error=str(e))]
 
-def jira_get_recent_user_activity(jira_base_url: str, jira_token: str, days: int = 14, max_results: int = 20) -> list[JiraIssue] | list[JiraError]:
+def jira_get_recent_user_activity(jira_base_url: str, jira_token: str, days: int = 14, start_at: int = 0, max_results: int = 20) -> JiraSearchResult | list[JiraError]:
     """
     Get issues updated in the last `days` where the user is assignee, reporter, or watcher.
     """
     jql = f"updated >= -{days}d AND (assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) ORDER BY updated DESC"
-    return jira_search_issues(jql, jira_base_url, jira_token)
+    return jira_search_issues(jql, jira_base_url, jira_token, start_at=start_at, max_results=max_results)
+
+def jira_get_open_user_issues(jira_base_url: str, jira_token: str, start_at: int = 0, max_results: int = 20) -> JiraSearchResult | list[JiraError]:
+    """
+    Get issues reported by or assigned to the user that are not closed (statusCategory != Done).
+    """
+    jql = "(assignee = currentUser() OR reporter = currentUser()) AND statusCategory != Done ORDER BY updated DESC"
+    return jira_search_issues(jql, jira_base_url, jira_token, start_at=start_at, max_results=max_results)
 

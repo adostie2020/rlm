@@ -22,14 +22,23 @@ export default function Page() {
 
 function ChatInterface({ session }: { session: any }) {
   const [input, setInput] = useState('');
+  const user = session?.user as any;
+  const initialCloudId = (() => {
+    if (Array.isArray(user?.jiraCloudId)) return user.jiraCloudId[0]?.id;
+    if (user?.jiraCloudId && typeof user.jiraCloudId === 'object') return (user.jiraCloudId as any).id;
+    return user?.jiraCloudId;
+  })();
+  const [selectedCloudId, setSelectedCloudId] = useState<string | undefined>(initialCloudId);
 
   const headers: Record<string, string> = {};
-  const user = session?.user as any;
   if (user?.jiraAccessToken) {
     headers['X-Jira-Token'] = user.jiraAccessToken;
   }
-  if (user?.jiraCloudId) {
-    headers['X-Jira-Resource-Id'] = user.jiraCloudId;
+  if (user?.jiraRefreshToken) {
+    headers['X-Jira-Refresh-Token'] = user.jiraRefreshToken;
+  }
+  if (selectedCloudId) {
+    headers['X-Jira-Resource-Id'] = selectedCloudId;
   }
 
   const { messages, sendMessage, status } = useChat({
@@ -75,10 +84,32 @@ function ChatInterface({ session }: { session: any }) {
   return (
     <div className="flex flex-col gap-2">
       {/* Session Debug Panel */}
-      <div className="bg-zinc-100 border border-zinc-200 p-2 mx-auto mt-2 w-full max-w-screen-lg md:w-[120ch] text-xs font-mono rounded overflow-hidden">
+      <div className="bg-zinc-100 border border-zinc-200 p-2 mx-auto mt-2 w-full max-w-screen-lg md:w-[120ch] text-xs font-mono rounded overflow-hidden flex flex-col gap-1">
         <div>Session Jira Token present: {user?.jiraAccessToken ? 'YES' : 'NO'}</div>
-        <div>Session Cloud ID: {user?.jiraCloudId || 'NONE'}</div>
-        <div className="truncate">Prepared Headers: {JSON.stringify(headers)}</div>
+        <div className="flex items-center gap-2 text-zinc-600">
+          <span>Cloud ID:</span>
+          <select
+            value={selectedCloudId}
+            onChange={(e) => setSelectedCloudId(e.target.value)}
+            className="bg-white border border-zinc-300 rounded px-1 py-0.5 text-[10px] focus:border-zinc-500 outline-none cursor-pointer"
+          >
+            {!user?.jiraCloudId && <option value="">NONE</option>}
+            {Array.isArray(user?.jiraCloudId) ? (
+              user.jiraCloudId.map((resource: any) => (
+                <option key={resource.id} value={resource.id}>
+                  {resource.name} ({resource.id})
+                </option>
+              ))
+            ) : (
+              user?.jiraCloudId && (
+                <option value={typeof user.jiraCloudId === 'string' ? user.jiraCloudId : user.jiraCloudId.id}>
+                  {typeof user.jiraCloudId === 'string' ? user.jiraCloudId : user.jiraCloudId.name}
+                </option>
+              )
+            )}
+          </select>
+        </div>
+        <div>Session Jira Token: {user?.jiraAccessToken?.substring(0, 10)}...</div>
       </div>
       <div className="flex flex-col w-full max-w-screen-lg mx-auto gap-4 p-4 md:w-[120ch]">
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 text-amber-900 text-sm">

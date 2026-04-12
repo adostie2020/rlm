@@ -15,6 +15,14 @@ JIRA_TOOLS = [
                         "type": "string",
                         "description": "The JQL query string (e.g., 'project = PROJ AND status = Open')."
                     }, 
+                    "startAt": {
+                        "type": "integer",
+                        "description": "The index of the first issue to return (0-based)."
+                    },
+                    "maxResults": {
+                        "type": "integer",
+                        "description": "The maximum number of issues to return (default 20)."
+                    },
                     "fields": {"type":"string",
                         "description": "A list of fields to include in the response"
                     }

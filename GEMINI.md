@@ -318,3 +318,18 @@ When building a new isolated environment (e.g., for a new cloud provider):
 
 See `rlm/environments/modal_repl.py` as the canonical reference implementation.
 
+
+## Deployment Architecture
+
+The RLM project follows a split-deployment model to ensure stability and avoid request timeouts:
+
+### Backend (API)
+- **Host**: Render
+- **Source**: Root directory (`/`)
+- **Key Files**: `api/index.py`, `rlm/`, `jira_app/`, `rag_processing.py`, `tools.py`
+- **Configuration**: The root directory structure is maintained so that Render can access all core libraries and helper modules.
+
+### Frontend (User Interface)
+- **Host**: Vercel
+- **Source**: `next-fastapi-app/` directory
+- **Proxying**: Requests are proxied to the Render backend. The `next-fastapi-app/api/route.ts` handles the authentication bridging between NextAuth and the RLM backend.

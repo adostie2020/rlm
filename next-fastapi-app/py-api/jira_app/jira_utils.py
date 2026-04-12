@@ -1,6 +1,7 @@
 import os
 import requests
-from typing import Any
+from typing import Any, TypedDict
+
 from pydantic import BaseModel, Field
 
 # Environment variables expected:
@@ -64,6 +65,12 @@ class JiraComment(BaseModel):
 class JiraError(BaseModel):
     error: str
 
+
+class JiraSearchResult(TypedDict):
+    jira_issues: list[JiraIssue]
+    nextPageToken: str | None
+
+
 # --- Helper ---
 
 def _get_jira_session(base_url: str, token: str):
@@ -80,8 +87,8 @@ def _get_jira_session(base_url: str, token: str):
 
 # --- Tool Functions ---
 
-def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate", start_at: int = 0, max_results: int = 50
-) -> list[JiraIssue] | list[JiraError]:
+def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, start_at: int = 0, max_results: int = 20, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"
+) -> JiraSearchResult | list[JiraError]:
     """Search for Jira issues using JQL and return validated Pydantic models."""
     try:
         session, base_url = _get_jira_session(jira_base_url, jira_token)
@@ -99,8 +106,10 @@ def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, fields: st
         
         issues_data = data.get("issues", [])
         # Validate and return list of JiraIssue models
-        return [JiraIssue(**issue) for issue in issues_data]
-        
+        issues = [JiraIssue(**issue) for issue in issues_data]
+        next_token = data.get("nextPageToken")
+        return {"jira_issues": issues, "nextPageToken": next_token}
+
     except Exception as e:
         return [JiraError(error=str(e))]
 
@@ -154,13 +163,15 @@ def jira_list_projects(jira_base_url: str, jira_token: str) -> list[JiraProject]
     """List all visible projects as Pydantic models."""
     try:
         session, base_url = _get_jira_session(jira_base_url, jira_token)
-        url = f"{base_url}/rest/api/3/project"
+        url = f"{base_url}/rest/api/3/project/search"
         
         response = session.get(url)
         response.raise_for_status()
         data = response.json()
-        
-        return [JiraProject(**proj) for proj in data]
+        print(data)
+        projects_data = data.get("values", [])
+        return [JiraProject(**proj) for proj in projects_data]
+
         
     except Exception as e:
         return [JiraError(error=str(e))]
@@ -175,20 +186,20 @@ def jira_get_recent_projects(jira_base_url: str, jira_token: str) -> list[JiraPr
         response = session.get(url, params=params)
         response.raise_for_status()
         data = response.json()
-        
+        print(data)
         return [JiraProject(**proj) for proj in data]
         
     except Exception as e:
         return [JiraError(error=str(e))]
 
-def jira_get_recent_user_activity(jira_base_url: str, jira_token: str, days: int = 14, max_results: int = 20) -> list[JiraIssue] | list[JiraError]:
+def jira_get_recent_user_activity(jira_base_url: str, jira_token: str, days: int = 14, start_at: int = 0, max_results: int = 20) -> JiraSearchResult | list[JiraError]:
     """
     Get issues updated in the last `days` where the user is assignee, reporter, or watcher.
     """
     jql = f"updated >= -{days}d AND (assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) ORDER BY updated DESC"
-    return jira_search_issues(jql, jira_base_url, jira_token, max_results=max_results)
+    return jira_search_issues(jql, jira_base_url, jira_token, start_at=start_at, max_results=max_results)
 
-def jira_get_open_user_issues(jira_base_url: str, jira_token: str, start_at: int = 0, max_results: int = 20) -> list[JiraIssue] | list[JiraError]:
+def jira_get_open_user_issues(jira_base_url: str, jira_token: str, start_at: int = 0, max_results: int = 20) -> JiraSearchResult | list[JiraError]:
     """
     Get issues reported by or assigned to the user that are not closed (statusCategory != Done).
     """

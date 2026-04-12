@@ -3,6 +3,12 @@ import { type DefaultJWT } from "next-auth/jwt";
 
 export type UserType = "user" | "guest" | "regular";
 
+export interface JiraResource {
+    id: string;
+    name: string;
+    url?: string;
+}
+
 declare module "next-auth" {
     interface Session {
         user: {
@@ -10,7 +16,7 @@ declare module "next-auth" {
             type: UserType;
             jiraAccessToken?: string;
             jiraRefreshToken?: string;
-            jiraCloudId?: string;
+            jiraCloudId?: JiraResource[] | string;
         } & DefaultSession["user"];
     }
 
@@ -20,7 +26,7 @@ declare module "next-auth" {
         type: UserType;
         jiraAccessToken?: string;
         jiraRefreshToken?: string;
-        jiraCloudId?: string;
+        jiraCloudId?: JiraResource[] | string;
     }
 }
 
@@ -30,6 +36,6 @@ declare module "next-auth/jwt" {
         type: UserType;
         jiraAccessToken?: string;
         jiraRefreshToken?: string;
-        jiraCloudId?: string;
+        jiraCloudId?: JiraResource[] | string;
     }
 }

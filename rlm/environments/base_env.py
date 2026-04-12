@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Protocol, runtime_checkable
-from jira_utils import *
+
 
 from rlm.core.types import REPLResult
 
