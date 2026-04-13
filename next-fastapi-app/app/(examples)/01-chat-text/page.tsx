@@ -3,11 +3,19 @@
 import { Card } from '@/app/components';
 import { useChat } from '@ai-sdk/react';
 import { TextStreamChatTransport } from 'ai';
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useSession, signIn, signOut } from 'next-auth/react';
 
 export default function Page() {
-  const { data: session, status: sessionStatus } = useSession();
+  const { data: session, status: sessionStatus, update } = useSession();
+  const user = session?.user as any;
+
+  const initialCloudId = (() => {
+    if (Array.isArray(user?.jiraCloudId)) return user.jiraCloudId[0]?.id;
+    if (user?.jiraCloudId && typeof user.jiraCloudId === 'object') return (user.jiraCloudId as any).id;
+    return user?.jiraCloudId;
+  })();
+  const [selectedCloudId, setSelectedCloudId] = useState<string | undefined>(initialCloudId);
 
   if (sessionStatus === 'loading') {
     return (
@@ -17,35 +25,75 @@ export default function Page() {
     );
   }
 
-  return <ChatInterface session={session} />;
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Cloud ID Selector — lives outside ChatInterface so changing it triggers a remount */}
+      <div className="bg-zinc-100 border border-zinc-200 p-2 mx-auto mt-2 w-full max-w-screen-lg md:w-[120ch] text-xs font-mono rounded overflow-hidden flex flex-col gap-1">
+        <div>Session Jira Token present: {user?.jiraAccessToken ? 'YES' : 'NO'}</div>
+        <div className="flex items-center gap-2 text-zinc-600">
+          <span>Cloud ID:</span>
+          <select
+            value={selectedCloudId}
+            onChange={(e) => setSelectedCloudId(e.target.value)}
+            className="bg-white border border-zinc-300 rounded px-1 py-0.5 text-[10px] focus:border-zinc-500 outline-none cursor-pointer"
+          >
+            {!user?.jiraCloudId && <option value="">NONE</option>}
+            {Array.isArray(user?.jiraCloudId) ? (
+              user.jiraCloudId.map((resource: any) => (
+                <option key={resource.id} value={resource.id}>
+                  {resource.name} ({resource.id})
+                </option>
+              ))
+            ) : (
+              user?.jiraCloudId && (
+                <option value={typeof user.jiraCloudId === 'string' ? user.jiraCloudId : user.jiraCloudId.id}>
+                  {typeof user.jiraCloudId === 'string' ? user.jiraCloudId : user.jiraCloudId.name}
+                </option>
+              )
+            )}
+          </select>
+        </div>
+      </div>
+
+      {/* Key on selectedCloudId forces full remount → useChat gets a fresh transport */}
+      <ChatInterface key={selectedCloudId} session={session} selectedCloudId={selectedCloudId} updateSession={update} />
+    </div>
+  );
 }
 
-function ChatInterface({ session }: { session: any }) {
+function ChatInterface({ session, selectedCloudId, updateSession }: { session: any; selectedCloudId: string | undefined; updateSession: (data?: any) => Promise<any> }) {
   const [input, setInput] = useState('');
   const user = session?.user as any;
-  const initialCloudId = (() => {
-    if (Array.isArray(user?.jiraCloudId)) return user.jiraCloudId[0]?.id;
-    if (user?.jiraCloudId && typeof user.jiraCloudId === 'object') return (user.jiraCloudId as any).id;
-    return user?.jiraCloudId;
-  })();
-  const [selectedCloudId, setSelectedCloudId] = useState<string | undefined>(initialCloudId);
 
-  const headers: Record<string, string> = {};
-  if (user?.jiraAccessToken) {
-    headers['X-Jira-Token'] = user.jiraAccessToken;
-  }
-  if (user?.jiraRefreshToken) {
-    headers['X-Jira-Refresh-Token'] = user.jiraRefreshToken;
-  }
-  if (selectedCloudId) {
-    headers['X-Jira-Resource-Id'] = selectedCloudId;
-  }
+  const transport = useMemo(() => {
+    const h: Record<string, string> = {};
+    if (user?.jiraAccessToken) h['X-Jira-Token'] = user.jiraAccessToken;
+    if (user?.jiraRefreshToken) h['X-Jira-Refresh-Token'] = user.jiraRefreshToken;
+    if (selectedCloudId) h['X-Jira-Resource-Id'] = selectedCloudId;
+    console.log('[ChatInterface] Transport created with Cloud ID:', selectedCloudId);
+    return new TextStreamChatTransport({
+      api: '/api/chat?protocol=text',
+      headers: h,
+    });
+  }, [user?.jiraAccessToken, user?.jiraRefreshToken, selectedCloudId]);
+
+  // When the backend refreshes the Jira token, it returns new tokens via headers.
+  // We persist them into the NextAuth session so future requests use the fresh token.
+  const handleResponse = useCallback(async (response: Response) => {
+    const newToken = response.headers.get('X-New-Jira-Token');
+    const newRefresh = response.headers.get('X-New-Jira-Refresh-Token');
+    if (newToken) {
+      console.log('[ChatInterface] Jira token was refreshed by backend, updating session.');
+      await updateSession({
+        jiraAccessToken: newToken,
+        ...(newRefresh ? { jiraRefreshToken: newRefresh } : {}),
+      });
+    }
+  }, [updateSession]);
 
   const { messages, sendMessage, status } = useChat({
-    transport: new TextStreamChatTransport({
-      api: '/api/chat?protocol=text',
-      headers,
-    }),
+    transport,
+    onResponse: handleResponse,
   });
   const scrollToNextSection = () => {
     const sections = Array.from(document.querySelectorAll('section'));
@@ -82,35 +130,7 @@ function ChatInterface({ session }: { session: any }) {
   };
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* Session Debug Panel */}
-      <div className="bg-zinc-100 border border-zinc-200 p-2 mx-auto mt-2 w-full max-w-screen-lg md:w-[120ch] text-xs font-mono rounded overflow-hidden flex flex-col gap-1">
-        <div>Session Jira Token present: {user?.jiraAccessToken ? 'YES' : 'NO'}</div>
-        <div className="flex items-center gap-2 text-zinc-600">
-          <span>Cloud ID:</span>
-          <select
-            value={selectedCloudId}
-            onChange={(e) => setSelectedCloudId(e.target.value)}
-            className="bg-white border border-zinc-300 rounded px-1 py-0.5 text-[10px] focus:border-zinc-500 outline-none cursor-pointer"
-          >
-            {!user?.jiraCloudId && <option value="">NONE</option>}
-            {Array.isArray(user?.jiraCloudId) ? (
-              user.jiraCloudId.map((resource: any) => (
-                <option key={resource.id} value={resource.id}>
-                  {resource.name} ({resource.id})
-                </option>
-              ))
-            ) : (
-              user?.jiraCloudId && (
-                <option value={typeof user.jiraCloudId === 'string' ? user.jiraCloudId : user.jiraCloudId.id}>
-                  {typeof user.jiraCloudId === 'string' ? user.jiraCloudId : user.jiraCloudId.name}
-                </option>
-              )
-            )}
-          </select>
-        </div>
-        <div>Session Jira Token: {user?.jiraAccessToken?.substring(0, 10)}...</div>
-      </div>
+    <>
       <div className="flex flex-col w-full max-w-screen-lg mx-auto gap-4 p-4 md:w-[120ch]">
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3 text-amber-900 text-sm">
           <div className="mt-0.5">
@@ -186,7 +206,6 @@ function ChatInterface({ session }: { session: any }) {
           disabled={status !== 'ready'}
         />
       </form>
-
-    </div>
+    </>
   );
 }

@@ -4,6 +4,8 @@ from typing import Any, TypedDict
 
 from pydantic import BaseModel, Field
 
+from jira_app.jira_auth import jira_request_with_retry
+
 # Environment variables expected:
 # JIRA_BASE_URL
 # JIRA_API_TOKEN
@@ -71,6 +73,12 @@ class JiraSearchResult(TypedDict):
     nextPageToken: str | None
 
 
+class JiraResultWithTokens(TypedDict, total=False):
+    """Wraps any Jira result with optional refreshed token metadata."""
+    data: Any
+    new_tokens: dict[str, str] | None
+
+
 # --- Helper ---
 
 def _get_jira_session(base_url: str, token: str):
@@ -87,11 +95,12 @@ def _get_jira_session(base_url: str, token: str):
 
 # --- Tool Functions ---
 
-def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, start_at: int = 0, max_results: int = 20, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate"
+def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, start_at: int = 0, max_results: int = 20, fields: str = "summary,status,assignee,priority,created,description,issuetype,issuelinks,comment,project, duedate",
+    jira_refresh_token: str | None = None,
 ) -> JiraSearchResult | list[JiraError]:
     """Search for Jira issues using JQL and return validated Pydantic models."""
     try:
-        session, base_url = _get_jira_session(jira_base_url, jira_token)
+        base_url = jira_base_url.rstrip("/")
         url = f"{base_url}/rest/api/3/search/jql"
         params = {
             "jql": jql,
@@ -100,7 +109,9 @@ def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, start_at: 
             "fields": fields
         }
         
-        response = session.get(url, params=params)
+        response, new_tokens = jira_request_with_retry(
+            "GET", url, jira_token, jira_refresh_token, params=params
+        )
         response.raise_for_status()
         data = response.json()
         
@@ -108,101 +119,143 @@ def jira_search_issues(jql: str, jira_base_url: str, jira_token: str, start_at: 
         # Validate and return list of JiraIssue models
         issues = [JiraIssue(**issue) for issue in issues_data]
         next_token = data.get("nextPageToken")
-        return {"jira_issues": issues, "nextPageToken": next_token}
+        result: JiraSearchResult = {"jira_issues": issues, "nextPageToken": next_token}
+
+        if new_tokens:
+            return {"data": result, "new_tokens": new_tokens}  # type: ignore[return-value]
+        return result
 
     except Exception as e:
         return [JiraError(error=str(e))]
 
-def jira_get_issue(issue_key: str, jira_base_url: str, jira_token: str) -> JiraIssue | JiraError:
+def jira_get_issue(issue_key: str, jira_base_url: str, jira_token: str,
+    jira_refresh_token: str | None = None,
+) -> JiraIssue | JiraError:
     """Get details of a specific Jira issue as a Pydantic model."""
     try:
-        session, base_url = _get_jira_session(jira_base_url, jira_token)
+        base_url = jira_base_url.rstrip("/")
         url = f"{base_url}/rest/api/3/issue/{issue_key}"
         
-        response = session.get(url)
+        response, new_tokens = jira_request_with_retry(
+            "GET", url, jira_token, jira_refresh_token
+        )
         response.raise_for_status()
         data = response.json()
         
-        return JiraIssue(**data)
+        result = JiraIssue(**data)
+        if new_tokens:
+            return {"data": result, "new_tokens": new_tokens}  # type: ignore[return-value]
+        return result
         
     except Exception as e:
         return JiraError(error=str(e))
 
-def jira_get_issue_comments(issue_key: str, jira_base_url: str, jira_token: str) -> list[JiraComment] | JiraError:
+def jira_get_issue_comments(issue_key: str, jira_base_url: str, jira_token: str,
+    jira_refresh_token: str | None = None,
+) -> list[JiraComment] | JiraError:
     """Get all comments for a specific Jira issue as a list of Pydantic models."""
     try:
-        session, base_url = _get_jira_session(jira_base_url, jira_token)
+        base_url = jira_base_url.rstrip("/")
         url = f"{base_url}/rest/api/3/issue/{issue_key}/comment"
         
-        response = session.get(url)
+        response, new_tokens = jira_request_with_retry(
+            "GET", url, jira_token, jira_refresh_token
+        )
         response.raise_for_status()
         data = response.json()
         
         comments_data = data.get("comments", [])
-        return [JiraComment(**comment) for comment in comments_data]
+        result = [JiraComment(**comment) for comment in comments_data]
+        if new_tokens:
+            return {"data": result, "new_tokens": new_tokens}  # type: ignore[return-value]
+        return result
         
     except Exception as e:
         return JiraError(error=str(e))
 
-def jira_get_project(project_key: str, jira_base_url: str, jira_token: str) -> JiraProject | JiraError:
+def jira_get_project(project_key: str, jira_base_url: str, jira_token: str,
+    jira_refresh_token: str | None = None,
+) -> JiraProject | JiraError:
     """Get details of a specific Jira project as a Pydantic model."""
     try:
-        session, base_url = _get_jira_session(jira_base_url, jira_token)
+        base_url = jira_base_url.rstrip("/")
         url = f"{base_url}/rest/api/3/project/{project_key}"
         
-        response = session.get(url)
+        response, new_tokens = jira_request_with_retry(
+            "GET", url, jira_token, jira_refresh_token
+        )
         response.raise_for_status()
         data = response.json()
         
-        return JiraProject(**data)
+        result = JiraProject(**data)
+        if new_tokens:
+            return {"data": result, "new_tokens": new_tokens}  # type: ignore[return-value]
+        return result
         
     except Exception as e:
         return JiraError(error=str(e))
 
-def jira_list_projects(jira_base_url: str, jira_token: str) -> list[JiraProject] | list[JiraError]:
+def jira_list_projects(jira_base_url: str, jira_token: str,
+    jira_refresh_token: str | None = None,
+) -> list[JiraProject] | list[JiraError]:
     """List all visible projects as Pydantic models."""
     try:
-        session, base_url = _get_jira_session(jira_base_url, jira_token)
+        base_url = jira_base_url.rstrip("/")
         url = f"{base_url}/rest/api/3/project/search"
         
-        response = session.get(url)
+        response, new_tokens = jira_request_with_retry(
+            "GET", url, jira_token, jira_refresh_token
+        )
         response.raise_for_status()
         data = response.json()
         
         projects_data = data.get("values", [])
-        return [JiraProject(**proj) for proj in projects_data]
+        result = [JiraProject(**proj) for proj in projects_data]
+        if new_tokens:
+            return {"data": result, "new_tokens": new_tokens}  # type: ignore[return-value]
+        return result
 
         
     except Exception as e:
         return [JiraError(error=str(e))]
 
-def jira_get_recent_projects(jira_base_url: str, jira_token: str) -> list[JiraProject] | list[JiraError]:
+def jira_get_recent_projects(jira_base_url: str, jira_token: str,
+    jira_refresh_token: str | None = None,
+) -> list[JiraProject] | list[JiraError]:
     """Get the last 20 recent projects with insight details."""
     try:
-        session, base_url = _get_jira_session(jira_base_url, jira_token)
+        base_url = jira_base_url.rstrip("/")
         url = f"{base_url}/rest/api/3/project/recent"
         params = {"expand": "insight"}
         
-        response = session.get(url, params=params)
+        response, new_tokens = jira_request_with_retry(
+            "GET", url, jira_token, jira_refresh_token, params=params
+        )
         response.raise_for_status()
         data = response.json()
         
-        return [JiraProject(**proj) for proj in data]
+        result = [JiraProject(**proj) for proj in data]
+        if new_tokens:
+            return {"data": result, "new_tokens": new_tokens}  # type: ignore[return-value]
+        return result
         
     except Exception as e:
         return [JiraError(error=str(e))]
 
-def jira_get_recent_user_activity(jira_base_url: str, jira_token: str, days: int = 14, start_at: int = 0, max_results: int = 20) -> JiraSearchResult | list[JiraError]:
+def jira_get_recent_user_activity(jira_base_url: str, jira_token: str, days: int = 14, start_at: int = 0, max_results: int = 20,
+    jira_refresh_token: str | None = None,
+) -> JiraSearchResult | list[JiraError]:
     """
     Get issues updated in the last `days` where the user is assignee, reporter, or watcher.
     """
     jql = f"updated >= -{days}d AND (assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) ORDER BY updated DESC"
-    return jira_search_issues(jql, jira_base_url, jira_token, start_at=start_at, max_results=max_results)
+    return jira_search_issues(jql, jira_base_url, jira_token, start_at=start_at, max_results=max_results, jira_refresh_token=jira_refresh_token)
 
-def jira_get_open_user_issues(jira_base_url: str, jira_token: str, start_at: int = 0, max_results: int = 20) -> JiraSearchResult | list[JiraError]:
+def jira_get_open_user_issues(jira_base_url: str, jira_token: str, start_at: int = 0, max_results: int = 20,
+    jira_refresh_token: str | None = None,
+) -> JiraSearchResult | list[JiraError]:
     """
     Get issues reported by or assigned to the user that are not closed (statusCategory != Done).
     """
     jql = "(assignee = currentUser() OR reporter = currentUser()) AND statusCategory != Done ORDER BY updated DESC"
-    return jira_search_issues(jql, jira_base_url, jira_token, start_at=start_at, max_results=max_results)
-
+    return jira_search_issues(jql, jira_base_url, jira_token, start_at=start_at, max_results=max_results, jira_refresh_token=jira_refresh_token)

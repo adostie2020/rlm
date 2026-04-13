@@ -26,29 +26,56 @@ def translate_query(query: str) -> Json:
     print(response)
     return response.choices[0].message.content + "When you have completed processing, output a final answer."
 
-def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str | None = None) -> str | None:
+
+def _extract_data_and_tokens(result: any) -> tuple[any, dict[str, str] | None]:
+    """Extract the actual data and any new tokens from a Jira result.
+
+    Jira util functions return either the raw result or a dict with
+    {"data": ..., "new_tokens": ...} when a token refresh occurred.
     """
-    Fetches the 20 most recent active projects, user's recent activity, and open issues.
+    if isinstance(result, dict) and "new_tokens" in result and "data" in result:
+        return result["data"], result["new_tokens"]
+    return result, None
+
+
+def get_jira_context(
+    jira_base_url: str,
+    jira_token: str,
+    jira_refresh_token: str | None = None,
+    next_page_token: str | None = None,
+) -> tuple[str | None, dict[str, str] | None]:
+    """Fetches the 20 most recent active projects, user's recent activity, and open issues.
     Supports pagination for open issues via `next_page_token`.
-    Returns None if any of the Jira API calls fail.
+
+    Returns:
+        A tuple of (context_string, new_tokens). new_tokens is None if no
+        token refresh occurred, or {"access_token": ..., "refresh_token": ...}
+        if the token was refreshed during any Jira call.
     """
     if jira_get_recent_projects is None or jira_get_recent_user_activity is None or jira_get_open_user_issues is None:
-        return "Jira tools not available."
+        return "Jira tools not available.", None
     
     start_at = int(next_page_token) if next_page_token else 0
     max_results = 20
     context_parts = []
+    latest_new_tokens: dict[str, str] | None = None
+
+    def _update_tokens(new_tokens: dict[str, str] | None):
+        """Track the most recent set of refreshed tokens."""
+        nonlocal latest_new_tokens, jira_token, jira_refresh_token
+        if new_tokens:
+            latest_new_tokens = new_tokens
+            # Use the refreshed token for subsequent calls in this function
+            jira_token = new_tokens["access_token"]
+            jira_refresh_token = new_tokens.get("refresh_token", jira_refresh_token)
     
     # 1. Recent Projects
-    # Only fetch projects if we are on the first page to reduce noise, or always fetch?
-    # Usually context is rebuilt, so we probably want projects always, or maybe just on page 0.
-    # Let's keep it simple and always fetch for now, unless requested otherwise.
-    # Actually, if I am paging through issues, I might not need projects again.
-    # But let's stick to the previous behavior + pagination for issues.
-    
-    projects_result = jira_get_recent_projects(jira_base_url, jira_token)
+    projects_result = jira_get_recent_projects(jira_base_url, jira_token, jira_refresh_token=jira_refresh_token)
+    projects_result, new_tokens = _extract_data_and_tokens(projects_result)
+    _update_tokens(new_tokens)
+
     if isinstance(projects_result, list) and projects_result and isinstance(projects_result[0], JiraError):
-        return None
+        return None, latest_new_tokens
     elif projects_result:
         projects_str = ["Recent Jira Projects:"]
         for project in projects_result:
@@ -65,7 +92,9 @@ def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str |
     context_parts.append("\n" + "-"*20 + "\n")
 
     # 2. Recent User Activity
-    activity_result = jira_get_recent_user_activity(jira_base_url, jira_token)
+    activity_result = jira_get_recent_user_activity(jira_base_url, jira_token, jira_refresh_token=jira_refresh_token)
+    activity_result, new_tokens = _extract_data_and_tokens(activity_result)
+    _update_tokens(new_tokens)
     
     # Handle both list (legacy) and dict (new) returns
     activity_issues = []
@@ -78,7 +107,7 @@ def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str |
     
     if isinstance(activity_result, list) and activity_result and isinstance(activity_result[0], JiraError):
         print(f"[RAG] Jira Error in activity: {activity_result[0]}")
-        return None
+        return None, latest_new_tokens
     elif activity_issues:
         activity_str = ["Recent User Activity (Last 14 days):"]
         for issue in activity_issues:
@@ -93,7 +122,9 @@ def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str |
     context_parts.append("\n" + "-"*20 + "\n")
 
     # 3. Open Issues (Assigned/Reported)
-    open_issues_result = jira_get_open_user_issues(jira_base_url, jira_token, start_at=start_at, max_results=max_results)
+    open_issues_result = jira_get_open_user_issues(jira_base_url, jira_token, start_at=start_at, max_results=max_results, jira_refresh_token=jira_refresh_token)
+    open_issues_result, new_tokens = _extract_data_and_tokens(open_issues_result)
+    _update_tokens(new_tokens)
     
     # Handle both list (legacy) and dict (new) returns
     open_issues = []
@@ -106,7 +137,7 @@ def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str |
     
     if isinstance(open_issues_result, list) and open_issues_result and isinstance(open_issues_result[0], JiraError):
         print(f"[RAG] Jira Error in open issues: {open_issues_result[0]}")
-        return None
+        return None, latest_new_tokens
     elif open_issues:
         open_issues_str = [f"Open Issues (Assigned/Reported) - Page starting at {start_at}:"]
         for issue in open_issues:
@@ -124,7 +155,7 @@ def get_jira_context(jira_base_url: str, jira_token: str, next_page_token: str |
     else:
         context_parts.append("No open issues found for user.")
 
-    return "\n".join(context_parts)
+    return "\n".join(context_parts), latest_new_tokens
 
 def route_prompt_rag():
     """TODO"""

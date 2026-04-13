@@ -39,6 +39,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-New-Jira-Token", "X-New-Jira-Refresh-Token"],
 )
 
 # Initialize RLM
@@ -254,15 +255,24 @@ async def handle_chat_data(request: Request, body: ChatRequest, protocol: str = 
     
     # Jira Auth
     jira_token = request.headers.get("X-Jira-Token")
+    jira_refresh_token = request.headers.get("X-Jira-Refresh-Token")
     jira_cloud_id = request.headers.get("X-Jira-Resource-Id")
     
     jira_base_url = f"https://api.atlassian.com/ex/jira/{jira_cloud_id}" if jira_cloud_id else ""
     jira_context = "No Jira credentials provided."
+    new_jira_tokens: dict[str, str] | None = None
 
     if jira_token and jira_base_url:
         try:
-            # We assume get_jira_context can handle auth errors or returns None/Error string
-            jira_context = get_jira_context(jira_base_url, jira_token) or "Jira context not available."
+            jira_context_result, new_jira_tokens = get_jira_context(
+                jira_base_url, jira_token, jira_refresh_token=jira_refresh_token
+            )
+            jira_context = jira_context_result or "Jira context not available."
+            # If tokens were refreshed, use the new access token for setup_code
+            if new_jira_tokens:
+                jira_token = new_jira_tokens["access_token"]
+                jira_refresh_token = new_jira_tokens.get("refresh_token", jira_refresh_token)
+                print(f"[main] Jira token refreshed during context fetch.")
         except Exception as e:
             print(f"Error fetching Jira context: {e}")
             jira_context = "Error fetching Jira context."
@@ -324,6 +334,13 @@ def jira_list_projects():
     response.headers['Cache-Control'] = 'no-cache, no-transform'
     response.headers['X-Accel-Buffering'] = 'no'
     response.headers['Connection'] = 'keep-alive'
+
+    # Propagate refreshed Jira tokens back to the frontend
+    if new_jira_tokens:
+        response.headers['X-New-Jira-Token'] = new_jira_tokens['access_token']
+        if new_jira_tokens.get('refresh_token'):
+            response.headers['X-New-Jira-Refresh-Token'] = new_jira_tokens['refresh_token']
+
     return response
 
 if __name__ == "__main__":
