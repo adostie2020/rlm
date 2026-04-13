@@ -3,7 +3,7 @@
 import { Card } from '@/app/components';
 import { useChat } from '@ai-sdk/react';
 import { TextStreamChatTransport } from 'ai';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { useSession, signIn, signOut } from 'next-auth/react';
 
 export default function Page() {
@@ -74,26 +74,27 @@ function ChatInterface({ session, selectedCloudId, updateSession }: { session: a
     return new TextStreamChatTransport({
       api: '/api/chat?protocol=text',
       headers: h,
+      // Wrap fetch to intercept response headers for refreshed Jira tokens.
+      // When the backend refreshes an expired token, it returns new credentials
+      // via X-New-Jira-Token / X-New-Jira-Refresh-Token headers.
+      fetch: async (url, init) => {
+        const response = await fetch(url, init);
+        const newToken = response.headers.get('X-New-Jira-Token');
+        const newRefresh = response.headers.get('X-New-Jira-Refresh-Token');
+        if (newToken) {
+          console.log('[ChatInterface] Jira token was refreshed by backend, updating session.');
+          updateSession({
+            jiraAccessToken: newToken,
+            ...(newRefresh ? { jiraRefreshToken: newRefresh } : {}),
+          });
+        }
+        return response;
+      },
     });
-  }, [user?.jiraAccessToken, user?.jiraRefreshToken, selectedCloudId]);
-
-  // When the backend refreshes the Jira token, it returns new tokens via headers.
-  // We persist them into the NextAuth session so future requests use the fresh token.
-  const handleResponse = useCallback(async (response: Response) => {
-    const newToken = response.headers.get('X-New-Jira-Token');
-    const newRefresh = response.headers.get('X-New-Jira-Refresh-Token');
-    if (newToken) {
-      console.log('[ChatInterface] Jira token was refreshed by backend, updating session.');
-      await updateSession({
-        jiraAccessToken: newToken,
-        ...(newRefresh ? { jiraRefreshToken: newRefresh } : {}),
-      });
-    }
-  }, [updateSession]);
+  }, [user?.jiraAccessToken, user?.jiraRefreshToken, selectedCloudId, updateSession]);
 
   const { messages, sendMessage, status } = useChat({
     transport,
-    onResponse: handleResponse,
   });
   const scrollToNextSection = () => {
     const sections = Array.from(document.querySelectorAll('section'));
